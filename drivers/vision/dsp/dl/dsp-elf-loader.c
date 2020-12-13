@@ -246,7 +246,23 @@ static void __dsp_elf32_get_mem_rela(int idx, const char *sec_name,
 	}
 }
 
-static void __dsp_elf32_get_bss_symhash(struct dsp_elf32 *elf)
+static void *__dsp_elf32_get_ptr(struct dsp_elf32 *elf, void *src, size_t size)
+{
+	if ((src < (void *)elf->data) ||
+			(src + size > (void *)elf->data + elf->size)) {
+		DL_ERROR("[%s] invalid ptr access\n", __func__);
+		return NULL;
+	}
+
+	if (src + size < src) {
+		DL_ERROR("[%s] ptr overflow\n", __func__);
+		return NULL;
+	}
+
+	return src;
+}
+
+static int __dsp_elf32_get_bss_symhash(struct dsp_elf32 *elf)
 {
 	unsigned int idx;
 	struct dsp_elf32_sym *sym;
@@ -260,9 +276,22 @@ static void __dsp_elf32_get_bss_symhash(struct dsp_elf32 *elf)
 		ndx = sym->st_shndx;
 
 		if (ndx > 0 && ndx < elf->hdr->e_shnum) {
-			const char *sym_str = elf->strtab + sym->st_name;
-			const char *shstr = elf->shstrtab +
-				elf->shdr[ndx].sh_name;
+			const char *sym_str;
+			const char *shstr;
+
+			sym_str = __dsp_elf32_get_ptr(elf, elf->strtab +
+					sym->st_name, sizeof(char));
+			if (!sym_str) {
+				DL_ERROR("[%s] sym_str is NULL\n", __func__);
+				return -1;
+			}
+
+			shstr = __dsp_elf32_get_ptr(elf, elf->shstrtab +
+					elf->shdr[ndx].sh_name, sizeof(char));
+			if (!shstr) {
+				DL_ERROR("[%s] shstr is NULL\n", __func__);
+				return -1;
+			}
 
 			dsp_hash_push(&elf->symhash, sym_str, sym);
 
@@ -280,9 +309,11 @@ static void __dsp_elf32_get_bss_symhash(struct dsp_elf32 *elf)
 			}
 		}
 	}
+
+	return 0;
 }
 
-static void __dsp_elf32_get_extern_sym(struct dsp_elf32 *elf)
+static int __dsp_elf32_get_extern_sym(struct dsp_elf32 *elf)
 {
 	int ret;
 	unsigned int idx;
@@ -297,7 +328,14 @@ static void __dsp_elf32_get_extern_sym(struct dsp_elf32 *elf)
 		ndx = sym->st_shndx;
 
 		if (ndx == 0) {
-			const char *sym_str = elf->strtab + sym->st_name;
+			const char *sym_str;
+
+			sym_str = __dsp_elf32_get_ptr(elf, elf->strtab +
+					sym->st_name, sizeof(char));
+			if (!sym_str) {
+				DL_ERROR("[%s] sym_str is NULL\n", __func__);
+				return -1;
+			}
 
 			ret = dsp_hash_get(&elf->symhash, sym_str,
 					(void **)&sym);
@@ -315,6 +353,8 @@ static void __dsp_elf32_get_extern_sym(struct dsp_elf32 *elf)
 			}
 		}
 	}
+
+	return 0;
 }
 
 int dsp_elf32_load(struct dsp_elf32 *elf, struct dsp_dl_lib_file *file)
@@ -334,17 +374,52 @@ int dsp_elf32_load(struct dsp_elf32 *elf, struct dsp_dl_lib_file *file)
 	elf->data = (char *)file->mem;
 	elf->size = file->size;
 
-	elf->hdr = (struct dsp_elf32_hdr *)elf->data;
+	elf->hdr = __dsp_elf32_get_ptr(elf, elf->data,
+			sizeof(struct dsp_elf32_hdr));
+	if (!elf->hdr) {
+		DL_ERROR("[%s] elf->hdr is NULL\n", __func__);
+		return -1;
+	}
 
-	elf->shdr = (struct dsp_elf32_shdr *)(elf->data + elf->hdr->e_shoff);
+	elf->shdr = __dsp_elf32_get_ptr(elf, elf->data + elf->hdr->e_shoff,
+			sizeof(struct dsp_elf32_shdr));
+	if (!elf->shdr) {
+		DL_ERROR("[%s] elf->shdr is NULL\n", __func__);
+		return -1;
+	}
 	elf->shdr_num = elf->hdr->e_shnum;
 
-	shstrtab_hdr = elf->shdr + elf->hdr->e_shstrndx;
-	elf->shstrtab = elf->data + shstrtab_hdr->sh_offset;
+	shstrtab_hdr = __dsp_elf32_get_ptr(elf, elf->shdr +
+			elf->hdr->e_shstrndx, sizeof(struct dsp_elf32_shdr));
+	if (!shstrtab_hdr) {
+		DL_ERROR("[%s] shstrtab_hdr is NULL\n", __func__);
+		return -1;
+	}
+
+	elf->shstrtab = __dsp_elf32_get_ptr(elf, elf->data +
+			shstrtab_hdr->sh_offset, sizeof(char));
+	if (!elf->shstrtab) {
+		DL_ERROR("[%s] elf->shstrtab is NULL\n", __func__);
+		return -1;
+	}
 
 	for (idx = 0; idx < elf->hdr->e_shnum; idx++) {
-		struct dsp_elf32_shdr *shdr = elf->shdr + idx;
-		const char *shdr_name = elf->shstrtab + shdr->sh_name;
+		struct dsp_elf32_shdr *shdr;
+		const char *shdr_name;
+
+		shdr = __dsp_elf32_get_ptr(elf, elf->shdr + idx,
+				sizeof(struct dsp_elf32_shdr));
+		if (!shdr) {
+			DL_ERROR("[%s] shdr is NULL\n", __func__);
+			return -1;
+		}
+
+		shdr_name = __dsp_elf32_get_ptr(elf, elf->shstrtab +
+				shdr->sh_name, sizeof(char));
+		if (!shdr_name) {
+			DL_ERROR("[%s] shdr_name is NULL\n", __func__);
+			return -1;
+		}
 
 		if (shdr->sh_type == 2)
 			__dsp_elf32_get_symtab(idx, elf);
@@ -391,8 +466,18 @@ int dsp_elf32_load(struct dsp_elf32 *elf, struct dsp_dl_lib_file *file)
 		}
 	}
 
-	__dsp_elf32_get_bss_symhash(elf);
-	__dsp_elf32_get_extern_sym(elf);
+	ret = __dsp_elf32_get_bss_symhash(elf);
+	if (ret == -1) {
+		DL_ERROR("Failed to get bss symhash\n");
+		return -1;
+	}
+
+	ret = __dsp_elf32_get_extern_sym(elf);
+	if (ret == -1) {
+		DL_ERROR("Failed to get extern sym\n");
+		return -1;
+	}
+
 	return 0;
 }
 

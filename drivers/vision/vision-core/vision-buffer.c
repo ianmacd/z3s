@@ -217,6 +217,12 @@ static int __vb_unmap_dmabuf(struct vb_queue *q, struct vb_buffer *buffer)
 {
 	int ret = 0;
 
+	if (buffer == NULL) {
+		vision_err("vb_buffer(buffer) is NULL\n");
+		ret = -EFAULT;
+		goto p_err;
+	}
+
 	if (buffer->vaddr)
 		dma_buf_vunmap(buffer->dma_buf, buffer->vaddr);
 	if (buffer->daddr)
@@ -234,6 +240,7 @@ static int __vb_unmap_dmabuf(struct vb_queue *q, struct vb_buffer *buffer)
 	buffer->daddr = 0;
 	buffer->vaddr = NULL;
 
+p_err:
 	return ret;
 }
 #endif
@@ -241,6 +248,12 @@ static int __vb_unmap_dmabuf(struct vb_queue *q, struct vb_buffer *buffer)
 static int __vb_unmap_virtptr(struct vb_queue *q, struct vb_buffer *buffer)
 {
 	int ret = 0;
+
+	if (buffer == NULL) {
+		vision_err("vb_buffer(buffer) is NULL\n");
+		ret = -EFAULT;
+		goto p_err;
+	}
 
 	if (buffer->reserved)
 		kfree((void *)buffer->m.userptr);
@@ -252,6 +265,7 @@ static int __vb_unmap_virtptr(struct vb_queue *q, struct vb_buffer *buffer)
 	buffer->vaddr = NULL;
 	buffer->reserved = 0;
 
+p_err:
 	return ret;
 }
 
@@ -378,6 +392,12 @@ static int __vb_queue_alloc(struct vb_queue *q,
 	flist = &q->format;
 
 	/* allocation */
+	if (c->count > VB_MAX_CONTAINERLIST) {
+		vision_err("c->count(%d) cannot be greater to VB_MAX_CONTAINERLIST(%d)\n", c->count, VB_MAX_CONTAINERLIST);
+		ret = -EINVAL;
+		goto p_err;
+	}
+
 	alloc_size = sizeof(struct vb_bundle);
 	alloc_size += sizeof(struct vb_container) * c->count;
 	for (i = 0; i < c->count; ++i)
@@ -385,6 +405,7 @@ static int __vb_queue_alloc(struct vb_queue *q,
 
 	bundle = kzalloc(alloc_size, GFP_KERNEL);
 	if (!bundle) {
+		vision_err("bundle is NULL\n");
 		ret = -ENOMEM;
 		goto p_err;
 	}
@@ -436,7 +457,7 @@ static int __vb_queue_alloc(struct vb_queue *q,
 
 		if (!container->format) {
 			vision_err("format is not found\n");
-			vision_err("%s", DLOG_OUT());
+			vision_err("%s\n", DLOG_OUT());
 			kfree(bundle);
 			ret = -EINVAL;
 			goto p_err;
@@ -471,10 +492,17 @@ static int __vb_queue_free(struct vb_queue *q,
 	BUG_ON(!bundle);
 	BUG_ON(bundle->clist.index >= VB_MAX_BUFFER);
 
+	if (q == NULL) {
+		vision_err("vb_queue(q) is NULL\n");
+		ret = -EFAULT;
+		goto p_err;
+	}
+
 	q->bufs[bundle->clist.index] = NULL;
 	kfree(bundle);
 	q->num_buffers--;
 
+p_err:
 	return ret;
 }
 
@@ -495,18 +523,21 @@ static int __vb_queue_check(struct vb_bundle *bundle,
 	if (clist->index != c->index) {
 		vision_err("index is conflict(%d != %d)\n",
 			clist->index, c->index);
+		ret = -EINVAL;
 		goto p_err;
 	}
 
 	if (clist->direction != c->direction) {
 		vision_err("direction is conflict(%d != %d)\n",
 			clist->direction, c->direction);
+		ret = -EINVAL;
 		goto p_err;
 	}
 
 	if (clist->count != c->count) {
 		vision_err("count is conflict(%d != %d)\n",
 			clist->count, c->count);
+		ret = -EINVAL;
 		goto p_err;
 	}
 
@@ -521,12 +552,14 @@ static int __vb_queue_check(struct vb_bundle *bundle,
 		if (container->target != c->containers[i].target) {
 			vision_err("target is conflict(%d != %d)\n",
 				container->target, c->containers[i].target);
+			ret = -EINVAL;
 			goto p_err;
 		}
 
 		if (container->count != c->containers[i].count) {
 			vision_err("count is conflict(%d != %d)\n",
 				container->count, c->containers[i].count);
+			ret = -EINVAL;
 			goto p_err;
 		}
 
@@ -536,10 +569,12 @@ static int __vb_queue_check(struct vb_bundle *bundle,
 			if (buffer->m.fd != c->containers[i].buffers[j].m.fd) {
 				vision_err("buffer is conflict(%d != %d)\n",
 				buffer->m.fd, c->containers[i].buffers[j].m.fd);
+				ret = -EINVAL;
 				goto p_err;
 			}
 		}
 	}
+
 p_err:
 	return ret;
 }
@@ -556,7 +591,7 @@ static int __vb_buf_prepare(struct vb_queue *q, struct vb_bundle *bundle)
 	BUG_ON(!bundle);
 
 	if (test_bit(VS4L_CL_FLAG_PREPARE, &bundle->flags))
-		goto p_err;
+		return ret;
 
 	for (i = 0; i < bundle->clist.count; ++i) {
 		container = &bundle->clist.containers[i];
@@ -574,6 +609,7 @@ static int __vb_buf_prepare(struct vb_queue *q, struct vb_bundle *bundle)
 			break;
 		default:
 			vision_err("unsupported container type\n");
+			ret = -EINVAL;
 			goto p_err;
 		}
 
@@ -618,6 +654,7 @@ static int __vb_buf_prepare(struct vb_queue *q, struct vb_bundle *bundle)
 			break;
 		default:
 			vision_err("unsupported container memory type\n");
+			ret = -EINVAL;
 			goto p_err;
 		}
 	}
@@ -629,6 +666,7 @@ static int __vb_buf_prepare(struct vb_queue *q, struct vb_bundle *bundle)
 	}
 
 	set_bit(VS4L_CL_FLAG_PREPARE, &bundle->flags);
+
 p_err:
 	return ret;
 }
@@ -645,7 +683,7 @@ static int __vb_buf_unprepare(struct vb_queue *q, struct vb_bundle *bundle)
 	BUG_ON(!bundle);
 
 	if (!test_bit(VS4L_CL_FLAG_PREPARE, &bundle->flags))
-		goto p_err;
+		return ret;
 
 	for (i = 0; i < bundle->clist.count; ++i) {
 		container = &bundle->clist.containers[i];
@@ -663,6 +701,7 @@ static int __vb_buf_unprepare(struct vb_queue *q, struct vb_bundle *bundle)
 			break;
 		default:
 			vision_err("unsupported container type\n");
+			ret = -EINVAL;
 			goto p_err;
 		}
 
@@ -693,6 +732,7 @@ static int __vb_buf_unprepare(struct vb_queue *q, struct vb_bundle *bundle)
 			break;
 		default:
 			vision_err("unsupported container memory type\n");
+			ret = -EINVAL;
 			goto p_err;
 		}
 	}
@@ -720,7 +760,7 @@ static int __vb_wait_for_done_vb(struct vb_queue *q, int nonblocking)
 	}
 
 	if (!list_empty(&q->done_list))
-		goto p_err;
+		return ret;
 
 	if (nonblocking) {
 		vision_info("Nonblocking and no buffers to dequeue, will not wait\n");
@@ -745,14 +785,16 @@ static int __vb_get_done_vb(struct vb_queue *q,
 	int nonblocking)
 {
 	unsigned long flags;
-	int ret;
+	int ret = 0;
 
 	/*
 	 * Wait for at least one buffer to become available on the done_list.
 	 */
 	ret = __vb_wait_for_done_vb(q, nonblocking);
-	if (ret)
+	if (ret) {
+		vision_err("__vb_wait_for_done_vb is fail\n");
 		return ret;
+	}
 
 	/*
 	 * Driver's lock has been held since we last verified that done_list
@@ -820,6 +862,12 @@ int vb_queue_init(struct vb_queue *q,
 {
 	int ret = 0;
 
+	if (q == NULL) {
+		vision_err("vb_queue(q) is NULL\n");
+		ret = -EFAULT;
+		goto p_err;
+	}
+
 	INIT_LIST_HEAD(&q->queued_list);
 	atomic_set(&q->queued_count, 0);
 
@@ -844,6 +892,7 @@ int vb_queue_init(struct vb_queue *q,
 	q->format.count = 0;
 	q->format.formats = NULL;
 
+p_err:
 	return ret;
 }
 
@@ -855,8 +904,19 @@ int vb_queue_s_format(struct vb_queue *q, struct vs4l_format_list *flist)
 	struct vb_fmt *fmt;
 
 	q->format.count = flist->count;
-	q->format.formats = kcalloc(flist->count,
-		sizeof(struct vb_format), GFP_KERNEL);
+	q->format.formats = kcalloc(flist->count, sizeof(struct vb_format), GFP_KERNEL);
+	if (!q->format.formats) {
+		vision_err("q->format.formats is NULL\n");
+		ret = -ENOMEM;
+		goto p_err;
+	}
+
+	if (q->format.count > VB_MAX_BUFFER) {
+		vision_err("flist->count(%d) cannot be greater to VB_MAX_BUFFER(%d)\n", flist->count, VB_MAX_BUFFER);
+		ret = -EINVAL;
+		kfree(q->format.formats);
+		goto p_err;
+	}
 
 	for (i = 0; i < flist->count; ++i) {
 		f = &flist->formats[i];
@@ -883,10 +943,18 @@ int vb_queue_s_format(struct vb_queue *q, struct vs4l_format_list *flist)
 		q->format.formats[i].channels = f->channels;
 		q->format.formats[i].pixel_format = f->pixel_format;
 
+		if (q->format.formats[i].plane >= VB_MAX_PLANES) {
+			vision_err("f->plane(%d) cannot be greater or equal to VB_MAX_PLANES(%d)\n", q->format.formats[i].plane, VB_MAX_PLANES);
+			kfree(q->format.formats);
+			ret = -EINVAL;
+			goto p_err;
+		}
+
 		ret = __vb_plane_size(&q->format.formats[i]);
 		if (ret) {
 			vision_err("__vb_plane_size is fail(%d)\n", ret);
 			kfree(q->format.formats);
+			ret = -EINVAL;
 			goto p_err;
 		}
 	}
@@ -908,13 +976,13 @@ int vb_queue_start(struct vb_queue *q)
 	}
 	q->streaming = 1;
 	set_bit(VB_QUEUE_STATE_START, &q->state);
+
 p_err:
 	return ret;
 }
 
-int __vb_queue_clear(struct vb_queue *q)
+void __vb_queue_clear(struct vb_queue *q)
 {
-	int ret = 0;
 	unsigned long flags;
 	struct vb_bundle *pos_vb;
 	struct vb_bundle *n_vb;
@@ -939,8 +1007,6 @@ int __vb_queue_clear(struct vb_queue *q)
 		}
 	}
 	spin_unlock_irqrestore(&q->done_lock, flags);
-
-	return ret;
 }
 
 static int __vb_queue_stop(struct vb_queue *q, int is_forced)
@@ -990,15 +1056,19 @@ static int __vb_queue_stop(struct vb_queue *q, int is_forced)
 		ret = __vb_buf_unprepare(q, bundle);
 		if (ret) {
 			vision_err("__vb_buf_unprepare is fail(%d)\n", ret);
-			if (!is_forced)
+			if (!is_forced) {
+				ret = -EINVAL;
 				goto p_err;
+			}
 		}
 
 		ret = __vb_queue_free(q, bundle);
 		if (ret) {
 			vision_err("__vb_queue_free is fail(%d)\n", ret);
-			if (!is_forced)
+			if (!is_forced) {
+				ret = -EINVAL;
 				goto p_err;
+			}
 		}
 	}
 
@@ -1009,6 +1079,7 @@ static int __vb_queue_stop(struct vb_queue *q, int is_forced)
 		BUG();
 	}
 	clear_bit(VB_QUEUE_STATE_START, &q->state);
+
 p_err:
 	if (!is_forced)
 		return ret;
@@ -1054,12 +1125,6 @@ int vb_queue_qbuf(struct vb_queue *q, struct vs4l_container_list *c)
 			ret = -EINVAL;
 			goto p_err;
 		}
-	}
-
-	if (c->index >= VB_MAX_BUFFER) {
-		vision_err("qbuf: buffer index out of range\n");
-		ret = -EINVAL;
-		goto p_err;
 	}
 
 	bundle = q->bufs[c->index];
@@ -1122,6 +1187,7 @@ int vb_queue_qbuf(struct vb_queue *q, struct vs4l_container_list *c)
 	list_add_tail(&bundle->queued_entry, &q->queued_list);
 	bundle->state = VB_BUF_STATE_QUEUED;
 	atomic_inc(&q->queued_count);
+
 p_err:
 	return ret;
 }
@@ -1130,6 +1196,7 @@ int vb_queue_prepare(struct vb_queue *q, struct vs4l_container_list *c)
 {
 	int ret = 0;
 	struct vb_bundle *bundle;
+	u32 i;
 
 	if (q->direction != c->direction) {
 		vision_err("qbuf: invalid buffer direction\n");
@@ -1137,10 +1204,19 @@ int vb_queue_prepare(struct vb_queue *q, struct vs4l_container_list *c)
 		goto p_err;
 	}
 
-	if (c->index >= VB_MAX_BUFFER) {
-		vision_err("qbuf: buffer index out of range\n");
+	if (c->index >= VB_MAX_CONTAINERLIST) {
+		vision_err("qbuf: invalid container list index\n");
 		ret = -EINVAL;
 		goto p_err;
+	}
+
+	for (i = 0; i < c->count; i++) {
+		if (c->containers[i].count > VB_MAX_BUFFER) {
+			vision_err("qbuf: Max buffers are %d; passed %d buffers\n",
+				VB_MAX_BUFFER, c->containers[i].count);
+			ret = -EINVAL;
+			goto p_err;
+		}
 	}
 
 	bundle = q->bufs[c->index];
@@ -1170,6 +1246,7 @@ int vb_queue_prepare(struct vb_queue *q, struct vs4l_container_list *c)
 		vision_err("__vb_buf_prepare is fail(%d)\n", ret);
 		goto p_err;
 	}
+
 p_err:
 	return ret;
 }
@@ -1201,6 +1278,7 @@ int vb_queue_unprepare(struct vb_queue *q, struct vs4l_container_list *c)
 
 	} else {
 		vision_err("__vb_bundle doesn't exist(%d)\n", ret);
+		ret = -ENOMEM;
 		goto p_err;
 	}
 
@@ -1217,6 +1295,7 @@ int vb_queue_unprepare(struct vb_queue *q, struct vs4l_container_list *c)
 		vision_err("__vb_buf_prepare is fail(%d)\n", ret);
 		goto p_err;
 	}
+
 p_err:
 	return ret;
 }
@@ -1228,7 +1307,6 @@ int vb_queue_dqbuf(struct vb_queue *q,
 	int ret = 0;
 	struct vb_bundle *bundle = NULL;
 
-
 	if (q->direction != c->direction) {
 		vision_err("qbuf: invalid buffer direction\n");
 		ret = -EINVAL;
@@ -1238,13 +1316,14 @@ int vb_queue_dqbuf(struct vb_queue *q,
 	ret = __vb_get_done_vb(q, &bundle, c, nonblocking);
 	if (ret < 0 || bundle == NULL) {
 		if (ret != -EWOULDBLOCK)
-			vision_err("__vb2_get_done_vb is fail(%d)\n", ret);
+			vision_err("__vb_get_done_vb is fail(%d)\n", ret);
 		return ret;
 	}
 
 	if (bundle->state != VB_BUF_STATE_DONE) {
 		vision_err("dqbuf: Invalid buffer state(%X)\n", bundle->state);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto p_err;
 	}
 
 	/* Fill buffer information for the userspace */
