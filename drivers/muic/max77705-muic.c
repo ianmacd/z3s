@@ -1555,6 +1555,10 @@ static u8 max77705_resolve_chgtyp(struct max77705_muic_data *muic_data, u8 chgty
 		u8 spchgtyp, u8 dcdtmo, int irq)
 {
 	u8 ret = chgtyp;
+	u8 ccistat = 0;
+
+	max77705_read_reg(muic_data->i2c, REG_CC_STATUS0, &ccistat);
+	ccistat = (ccistat & BIT_CCIStat) >> FFS(BIT_CCIStat);
 
 #if defined(CONFIG_HICCUP_CHARGER)
 	/* Check hiccup mode */
@@ -1576,10 +1580,20 @@ static u8 max77705_resolve_chgtyp(struct max77705_muic_data *muic_data, u8 chgty
 	/* Check DCD timeout */
 	if (dcdtmo && chgtyp == CHGTYP_USB &&
 			(irq == muic_data->irq_chgtyp || irq == MUIC_IRQ_INIT_DETECT)) {
-		if (irq == MUIC_IRQ_INIT_DETECT)
+		if (irq == MUIC_IRQ_INIT_DETECT) {
 			ret = CHGTYP_TIMEOUT_OPEN;
-		else
+
+			if (ccistat == CCI_500mA) {
+				ret = CHGTYP_NO_VOLTAGE;
+				muic_data->dcdtmo_retry++;
+				pr_info("%s:%s DCD_TIMEOUT retry count: %d\n",
+						MUIC_DEV_NAME, __func__,
+						muic_data->dcdtmo_retry);
+				max77705_muic_enable_chgdet(muic_data);
+			}
+		} else {
 			ret = (muic_data->dcdtmo_retry >= 2) ? CHGTYP_TIMEOUT_OPEN : CHGTYP_NO_VOLTAGE;
+		}
 		goto out;
 	}
 

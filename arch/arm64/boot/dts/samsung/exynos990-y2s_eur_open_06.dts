@@ -3164,6 +3164,7 @@
 						60 {
 							pname = "VDDAF_COMMON_CAM";
 							pin = <0x05 0x01 0x01>;
+							actuator_i2c_delay = <0x2710>;
 						};
 
 						90 {
@@ -3985,6 +3986,7 @@
 						10 {
 							pname = "VDDAF_2.8V_VT";
 							pin = <0x05 0x01 0x00>;
+							actuator_i2c_delay = <0x2710>;
 						};
 
 						20 {
@@ -4712,6 +4714,7 @@
 						30 {
 							pname = "VDDAF_2.8V_SUB";
 							pin = <0x05 0x01 0x7d0>;
+							actuator_i2c_delay = <0x2710>;
 						};
 
 						40 {
@@ -8289,7 +8292,7 @@
 		target = <0xffffffff>;
 
 		__overlay__ {
-			size = <0x46 0x9b>;
+			size = <0x45 0x9a>;
 		};
 	};
 

@@ -41,6 +41,7 @@ static DEFINE_PANEL_UDELAY(s6e3hab_aod_self_spsram_sel_delay, 1);
 static DEFINE_PANEL_UDELAY(s6e3hab_aod_self_mask_checksum_1frame_delay, 16700);
 static DEFINE_PANEL_UDELAY(s6e3hab_aod_self_mask_checksum_2frame_delay, 33400);
 static DEFINE_PANEL_UDELAY(s6e3hab_aod_time_update_delay, 33400);
+static DEFINE_PANEL_MDELAY(s6e3hab_aod_self_spsram_reset_delay, 1);
 
 
 static DEFINE_PANEL_KEY(s6e3hab_aod_l1_key_enable, CMD_LEVEL_1,

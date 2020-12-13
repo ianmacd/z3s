@@ -1980,9 +1980,9 @@ static ssize_t show_kernel_sysfs_utilization(struct kobject *kobj, struct kobj_a
 		return -ENODEV;
 
 	if (platform->power_status == true && platform->inter_frame_pm_status == true && platform->inter_frame_pm_is_poweron == false) /* IFPO off case */
-		ret += snprintf(buf+ret, PAGE_SIZE-ret, "%d", 0);
+		ret += snprintf(buf+ret, PAGE_SIZE-ret, "%3d%%", 0);
 	else
-		ret += snprintf(buf+ret, PAGE_SIZE-ret, "%d", gpu_control_is_power_on(pkbdev) * platform->env_data.utilization);
+		ret += snprintf(buf+ret, PAGE_SIZE-ret, "%3d%%", gpu_control_is_power_on(pkbdev) * platform->env_data.utilization);
 
 	if (ret < PAGE_SIZE - 1) {
 		ret += snprintf(buf+ret, PAGE_SIZE-ret, "\n");
