@@ -177,7 +177,7 @@ static int call_battery_notify(struct usb_device *dev, bool on)
 	index = is_notify_hub(dev);
 	if (!index)
 		goto skip;
-	if (check_essential_device(dev, index))
+	if (!check_essential_device(dev, index))
 		goto skip;
 
 	hdev = dev->parent;
@@ -185,7 +185,7 @@ static int call_battery_notify(struct usb_device *dev, bool on)
 		goto skip;
 
 	usb_hub_for_each_child(hdev, port, udev) {
-		if (!check_essential_device(udev, index)) {
+		if (check_essential_device(udev, index)) {
 			if (!on && (udev == dev))
 				continue;
 			else

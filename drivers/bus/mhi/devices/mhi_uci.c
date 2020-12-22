@@ -6,7 +6,9 @@
 #include <linux/dma-direction.h>
 #include <linux/errno.h>
 #include <linux/fs.h>
+#ifdef CONFIG_IPC_LOGGING
 #include <linux/ipc_logging.h>
+#endif
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/of_device.h>
@@ -49,8 +51,10 @@ struct uci_dev {
 	int ref_count;
 	bool enabled;
 	u32 tiocm;
+#ifdef CONFIG_IPC_LOGGING
 	void *ipc_log;
 	enum MHI_DEBUG_LEVEL *ipc_log_lvl;
+#endif
 };
 
 struct mhi_uci_drv {
@@ -62,6 +66,8 @@ struct mhi_uci_drv {
 };
 
 enum MHI_DEBUG_LEVEL msg_lvl = MHI_MSG_LVL_ERROR;
+
+#ifdef CONFIG_IPC_LOGGING
 
 #ifdef CONFIG_MHI_DEBUG
 
@@ -104,7 +110,24 @@ enum MHI_DEBUG_LEVEL msg_lvl = MHI_MSG_LVL_ERROR;
 			ipc_log_string(uci_dev->ipc_log, "[E][%s] " fmt, \
 				       __func__, ##__VA_ARGS__); \
 	} while (0)
+#else // CONFIG_IPC_LOGGING
 
+#define MSG_VERB(fmt, ...) do { \
+                if (msg_lvl <= MHI_MSG_LVL_VERBOSE) \
+                        pr_err("[D][%s] " fmt, __func__, ##__VA_ARGS__); \
+        } while (0)
+
+#define MSG_LOG(fmt, ...) do { \
+                if (msg_lvl <= MHI_MSG_LVL_INFO) \
+                        pr_err("[I][%s] " fmt, __func__, ##__VA_ARGS__); \
+        } while (0)
+
+#define MSG_ERR(fmt, ...) do { \
+                if (msg_lvl <= MHI_MSG_LVL_ERROR) \
+                        pr_err("[E][%s] " fmt, __func__, ##__VA_ARGS__); \
+        } while (0)
+
+#endif // CONFIG_IPC_LOGGING
 #define MAX_UCI_DEVICES (64)
 
 static DECLARE_BITMAP(uci_minors, MAX_UCI_DEVICES);
@@ -570,7 +593,9 @@ static int mhi_uci_probe(struct mhi_device *mhi_dev,
 			 const struct mhi_device_id *id)
 {
 	struct uci_dev *uci_dev;
+#ifdef CONFIG_IPC_LOGGING
 	struct mhi_controller *mhi_cntrl = mhi_dev->mhi_cntrl;
+#endif
 	int minor;
 	char node_name[32];
 	int dir;
@@ -604,9 +629,11 @@ static int mhi_uci_probe(struct mhi_device *mhi_dev,
 	snprintf(node_name, sizeof(node_name), "mhi_uci_%04x_%02u.%02u.%02u_%d",
 		 mhi_dev->dev_id, mhi_dev->domain, mhi_dev->bus, mhi_dev->slot,
 		 mhi_dev->ul_chan_id);
+#ifdef CONFIG_IPC_LOGGING
 	uci_dev->ipc_log = ipc_log_context_create(MHI_UCI_IPC_LOG_PAGES,
 						  node_name, 0);
 	uci_dev->ipc_log_lvl = &mhi_cntrl->log_lvl;
+#endif
 
 	for (dir = 0; dir < 2; dir++) {
 		struct uci_chan *uci_chan = (dir) ?

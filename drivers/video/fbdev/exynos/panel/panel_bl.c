@@ -904,6 +904,10 @@ int panel_update_brightness(struct panel_device *panel)
 		goto exit_set;
 	}
 
+#ifdef CONFIG_SUPPORT_MASK_LAYER
+	panel_bl->props.last_br_update_time = ktime_get();
+#endif
+
 exit_set:
 	mutex_unlock(&panel->op_lock);
 	mutex_unlock(&panel_bl->lock);

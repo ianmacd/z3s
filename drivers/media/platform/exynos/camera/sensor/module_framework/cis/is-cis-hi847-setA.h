@@ -20,8 +20,8 @@
  *
  * Reference File :
  *    CHIP ID REV 0x0000 (only for bring-up) : Hi-847_setting_v0.2.0.68_SEC4_20200513.xlsx  (only 3264x2448 Full & 1632x1224 BIN2)
- *    CHIP ID REV 0x0010 (applied ROM revision) : Hi-847_setting_v1.0.0.69_SEC5_20200603.xlsx
- * Update Date   : 2020-06-12
+ *    CHIP ID REV 0x0010 (applied ROM revision) : Hi-847_setting_v1.0.0.69_SEC9_20200722.xlsx
+ * Update Date   : 2020-07-22
  * Author        : takkyoum.kim
  *
  * - For Still Preview / Capture / Recording -
@@ -2306,8 +2306,8 @@ const u32 sensor_hi847_setfile_A_3264x1836_30fps[] = {
 	0x1600, 0xE000, 0x02,
 	0x1608, 0x0028, 0x02,
 	0x160A, 0x0C80, 0x02,
-	0x160C, 0x0010, 0x02,
-	0x160E, 0x0710, 0x02,
+	0x160C, 0x0018, 0x02,
+	0x160E, 0x0700, 0x02,
 };
 
 const u32 sensor_hi847_setfile_A_1632x1224_30fps[] = {

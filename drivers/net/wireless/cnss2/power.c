@@ -1078,11 +1078,6 @@ int cnss_power_on_device(struct cnss_plat_data *plat_priv)
 		return 0;
 	}
 
-	regulator_set_voltage(plat_priv->wlan_vdd, 750000, 750000);
-	cnss_pr_err("%s : set_voltage : 750000\n", __FUNCTION__);
-	regulator_set_voltage(plat_priv->wlan_vdd, 950000, 950000);
-	cnss_pr_err("%s : set_voltage : 950000\n", __FUNCTION__);
-
 	ret = regulator_enable(plat_priv->wlan_vdd);
 	if (ret) {
 		cnss_pr_err("Failed to enable wlan_vdd\n");

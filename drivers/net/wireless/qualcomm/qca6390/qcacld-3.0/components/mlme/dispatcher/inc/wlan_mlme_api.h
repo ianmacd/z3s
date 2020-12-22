@@ -2431,6 +2431,65 @@ wlan_mlme_get_status_ring_buffer(struct wlan_objmgr_psoc *psoc,
  */
 bool wlan_mlme_get_peer_unmap_conf(struct wlan_objmgr_psoc *psoc);
 
+#ifdef WLAN_FEATURE_SAE
+/**
+ * wlan_mlme_get_sae_assoc_retry_count() - Get the sae assoc retry count
+ * @psoc: pointer to psoc object
+ * @retry_count: assoc retry count
+ *
+ * Return: QDF Status
+ */
+QDF_STATUS
+wlan_mlme_get_sae_assoc_retry_count(struct wlan_objmgr_psoc *psoc,
+				    uint8_t *retry_count);
+/**
+ * wlan_mlme_get_sae_assoc_retry_count() - Get the sae auth retry count
+ * @psoc: pointer to psoc object
+ * @retry_count: auth retry count
+ *
+ * Return: QDF Status
+ */
+QDF_STATUS
+wlan_mlme_get_sae_auth_retry_count(struct wlan_objmgr_psoc *psoc,
+				   uint8_t *retry_count);
+
+/**
+ * wlan_mlme_get_sae_roam_auth_retry_count() - Get the sae roam auth retry count
+ * @psoc: pointer to psoc object
+ * @retry_count: auth retry count
+ *
+ * Return: QDF Status
+ */
+QDF_STATUS
+wlan_mlme_get_sae_roam_auth_retry_count(struct wlan_objmgr_psoc *psoc,
+					uint8_t *retry_count);
+
+#else
+static inline QDF_STATUS
+wlan_mlme_get_sae_assoc_retry_count(struct wlan_objmgr_psoc *psoc,
+				    uint8_t *retry_count)
+{
+	*retry_count = 0;
+	return QDF_STATUS_SUCCESS;
+}
+
+static inline QDF_STATUS
+wlan_mlme_get_sae_auth_retry_count(struct wlan_objmgr_psoc *psoc,
+				    uint8_t *retry_count)
+{
+	*retry_count = 0;
+	return QDF_STATUS_SUCCESS;
+}
+
+static inline QDF_STATUS
+wlan_mlme_get_sae_roam_auth_retry_count(struct wlan_objmgr_psoc *psoc,
+					uint8_t *retry_count)
+{
+	*retry_count = 0;
+	return QDF_STATUS_SUCCESS;
+}
+#endif
+
 #ifdef WLAN_FEATURE_ROAM_OFFLOAD
 /**
  * wlan_mlme_get_roam_reason_vsie_status() - Indicate if roam reason
@@ -2483,32 +2542,6 @@ uint32_t wlan_mlme_get_roaming_triggers(struct wlan_objmgr_psoc *psoc)
 {
 	return 0xFFFF;
 }
-#endif
-
-#ifdef WLAN_FEATURE_BCN_RPT_VSIE
-/**
- * wlan_mlme_get_bcn_rpt_err_vsie() - Indicate if beacon rpt err
- * vsie is enabled or disabled
- * @psoc: pointer to psoc object
- * @bcn_rpt_err_vsie_enabled: pointer to hold value of beacon rpt err
- *
- * Return: QDF_STATUS
- */
-QDF_STATUS
-wlan_mlme_get_bcn_rpt_err_vsie(struct wlan_objmgr_psoc *psoc,
-			       uint8_t *bcn_rpt_err_vsie_enabled);
-
-/**
- * wlan_mlme_set_bcn_rpt_err_vsie() - Indicate if beacon rpt err
- * vsie is enabled or disabled
- * @psoc: pointer to psoc object
- * @bcn_rpt_err_vsie_enabled: Value of beacon rpt err vsie
- *
- * Return: QDF_STATUS
- */
-QDF_STATUS
-wlan_mlme_set_bcn_rpt_err_vsie(struct wlan_objmgr_psoc *psoc,
-			       uint8_t roam_reason_vsie_enabled);
 #endif
 
 #endif /* _WLAN_MLME_API_H_ */

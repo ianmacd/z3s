@@ -62,11 +62,6 @@
  */
 #define CPU_WARM_RESET_WAR
 
-#ifdef CONFIG_ARCH_EXYNOS9
-#define GIC_IRQ_NUM 199
-uint32_t g_gic_irq_num=0;
-extern int exynos_pcie_get_irq_num(int ch_num);
-#endif
 /*
  * Top-level interrupt handler for all PCI interrupts from a Target.
  * When a block of MSI interrupts is allocated, this top-level handler
@@ -997,7 +992,7 @@ static void hif_pci_runtime_pm_warn(struct hif_pci_softc *sc, const char *msg)
 		return;
 	}
 
-	QDF_DEBUG_PANIC("hif_pci_runtime_pm_warn");
+	QDF_ASSERT(0);
 }
 
 /**
@@ -2444,7 +2439,7 @@ static int hif_ce_srng_msi_free_irq(struct hif_softc *scn)
 	 */
 	for (ce_id = 0; ce_id < scn->ce_count; ce_id++) {
 #ifdef CONFIG_ARCH_EXYNOS9
-                struct hif_pci_softc *pci_sc = HIF_GET_PCI_SOFTC(scn);
+		struct hif_pci_softc *pci_sc = HIF_GET_PCI_SOFTC(scn);
 #else
 		unsigned int msi_data;
 #endif
@@ -2456,14 +2451,19 @@ static int hif_ce_srng_msi_free_irq(struct hif_softc *scn)
 			continue;
 #ifdef CONFIG_ARCH_EXYNOS9
 		irq = pci_sc->ce_msi_irq_num[ce_id];
-		if (irq)
+		if (irq) {
+			hif_pci_ce_irq_remove_affinity_hint(irq);
 			pfrm_free_irq(scn->qdf_dev->dev, irq, &ce_sc->tasklets[ce_id]);
+		}
 #else
 		msi_data = (ce_id % msi_data_count) + msi_irq_start;
 		irq = pld_get_msi_irq(scn->qdf_dev->dev, msi_data);
 
+		hif_pci_ce_irq_remove_affinity_hint(irq);
+
 		hif_debug("%s: (ce_id %d, msi_data %d, irq %d)", __func__,
 			  ce_id, msi_data, irq);
+
 		pfrm_free_irq(scn->qdf_dev->dev, irq, &ce_sc->tasklets[ce_id]);
 #endif
 	}
@@ -2589,12 +2589,6 @@ void hif_pci_disable_bus(struct hif_softc *scn)
 		sc->hif_pci_deinit(sc);
 		scn->mem = NULL;
 	}
-#ifdef CONFIG_ARCH_EXYNOS9
-	if (g_gic_irq_num)
-		enable_irq(g_gic_irq_num);
-	else
-		enable_irq(GIC_IRQ_NUM);
-#endif
 	HIF_INFO("%s: X", __func__);
 }
 
@@ -2703,6 +2697,18 @@ static int __hif_check_link_status(struct hif_softc *scn)
 
 	HIF_ERROR("%s: Invalid PCIe Config Space; PCIe link down dev_id:0x%04x",
 	       __func__, dev_id);
+
+	/* To debug incorrect 0x1002 PID issue */
+	dev_id = 0;
+	pfrm_read_config_word(sc->pdev, PCI_DEVICE_ID, &dev_id);
+	HIF_ERROR("%s: Retry read with dev_id:0x%04x, expected:0x%04x",
+		  __func__, dev_id, sc->devid);
+
+	if (dev_id == sc->devid)
+		return 0;
+	else if (dev_id != 0xFFFF)
+		QDF_DEBUG_PANIC("Wrong PID from config-space");
+	/* End */
 
 	scn->recovery = true;
 
@@ -3438,23 +3444,12 @@ static void hif_ce_srng_msi_irq_disable(struct hif_softc *hif_sc, int ce_id)
 {
 	pfrm_disable_irq_nosync(hif_sc->qdf_dev->dev,
 				hif_ce_msi_map_ce_to_irq(hif_sc, ce_id));
-
-	if (g_gic_irq_num)
-		disable_irq_nosync(g_gic_irq_num);
-	else
-		disable_irq_nosync(GIC_IRQ_NUM);
-
 }
 
 static void hif_ce_srng_msi_irq_enable(struct hif_softc *hif_sc, int ce_id)
 {
 	pfrm_enable_irq(hif_sc->qdf_dev->dev,
 			hif_ce_msi_map_ce_to_irq(hif_sc, ce_id));
-	if (g_gic_irq_num)
-		enable_irq(g_gic_irq_num);
-	else
-		enable_irq(GIC_IRQ_NUM);
-
 }
 
 static void hif_ce_legacy_msi_irq_disable(struct hif_softc *hif_sc, int ce_id)
@@ -3603,11 +3598,6 @@ static void hif_exec_grp_irq_disable(struct hif_exec_context *hif_ext_group)
 	for (i = 0; i < hif_ext_group->numirq; i++)
 		pfrm_disable_irq_nosync(scn->qdf_dev->dev,
 					hif_ext_group->os_irq[i]);
-	if (g_gic_irq_num)
-		disable_irq_nosync(g_gic_irq_num);
-	else
-		disable_irq_nosync(GIC_IRQ_NUM);
-
 }
 
 static void hif_exec_grp_irq_enable(struct hif_exec_context *hif_ext_group)
@@ -3617,12 +3607,6 @@ static void hif_exec_grp_irq_enable(struct hif_exec_context *hif_ext_group)
 
 	for (i = 0; i < hif_ext_group->numirq; i++)
 		pfrm_enable_irq(scn->qdf_dev->dev, hif_ext_group->os_irq[i]);
-	
-	if (g_gic_irq_num)
-		enable_irq(g_gic_irq_num);
-	else
-		enable_irq(GIC_IRQ_NUM);
-
 }
 
 /**
@@ -3644,8 +3628,8 @@ const char *hif_pci_get_irq_name(int irq_no)
  * hif_pci_irq_set_affinity_hint() - API to set IRQ affinity
  * @hif_ext_group: hif_ext_group to extract the irq info
  *
- * This function will set the IRQ affinity to the gold cores
- * only for defconfig builds
+ * This function will set the WLAN DP IRQ affinity to the gold
+ * cores only for defconfig builds
  *
  * @hif_ext_group: hif_ext_group to extract the irq info
  *
@@ -3698,6 +3682,61 @@ void hif_pci_irq_set_affinity_hint(
 		}
 	}
 }
+
+void hif_pci_ce_irq_set_affinity_hint(
+	struct hif_softc *scn)
+{
+	int ret;
+	unsigned int cpus;
+	struct HIF_CE_state *ce_sc = HIF_GET_CE_STATE(scn);
+	struct hif_pci_softc *pci_sc = HIF_GET_PCI_SOFTC(scn);
+	struct CE_attr *host_ce_conf;
+	int ce_id;
+	qdf_cpu_mask ce_cpu_mask;
+
+	host_ce_conf = ce_sc->host_ce_config;
+	qdf_cpumask_clear(&ce_cpu_mask);
+
+	qdf_for_each_online_cpu(cpus) {
+		if (qdf_topology_physical_package_id(cpus) ==
+			CPU_CLUSTER_TYPE_PERF) {
+			qdf_cpumask_set_cpu(cpus,
+					    &ce_cpu_mask);
+		} else {
+			hif_err_rl("Unable to set cpu mask for offline CPU %d"
+				   , cpus);
+		}
+	}
+	if (qdf_cpumask_empty(&ce_cpu_mask)) {
+		hif_err_rl("Empty cpu_mask, unable to set CE IRQ affinity");
+		return;
+	}
+	for (ce_id = 0; ce_id < scn->ce_count; ce_id++) {
+		if (host_ce_conf[ce_id].flags & CE_ATTR_DISABLE_INTR)
+			continue;
+		qdf_cpumask_clear(&pci_sc->ce_irq_cpu_mask[ce_id]);
+		qdf_cpumask_copy(&pci_sc->ce_irq_cpu_mask[ce_id],
+				 &ce_cpu_mask);
+		qdf_dev_modify_irq_status(pci_sc->ce_msi_irq_num[ce_id],
+					  IRQ_NO_BALANCING, 0);
+		ret =
+		qdf_dev_set_irq_affinity(pci_sc->ce_msi_irq_num[ce_id],
+					 (struct qdf_cpu_mask *)
+					 &pci_sc->ce_irq_cpu_mask[ce_id]);
+		qdf_dev_modify_irq_status(pci_sc->ce_msi_irq_num[ce_id],
+					  0, IRQ_NO_BALANCING);
+		if (ret)
+			hif_err_rl("Set affinity %*pbl fails for CE IRQ %d",
+				   qdf_cpumask_pr_args(
+					&pci_sc->ce_irq_cpu_mask[ce_id]),
+				   pci_sc->ce_msi_irq_num[ce_id]);
+		else
+			hif_debug_rl("Set affinity %*pbl for CE IRQ: %d",
+				     qdf_cpumask_pr_args(
+					&pci_sc->ce_irq_cpu_mask[ce_id]),
+				     pci_sc->ce_msi_irq_num[ce_id]);
+	}
+}
 #endif /* #ifdef HIF_CPU_PERF_AFFINE_MASK */
 
 void hif_pci_config_irq_affinity(struct hif_softc *scn)
@@ -3707,10 +3746,13 @@ void hif_pci_config_irq_affinity(struct hif_softc *scn)
 	struct hif_exec_context *hif_ext_group;
 
 	hif_core_ctl_set_boost(true);
+	/* Set IRQ affinity for WLAN DP interrupts*/
 	for (i = 0; i < hif_state->hif_num_extgroup; i++) {
 		hif_ext_group = hif_state->hif_ext_group[i];
 		hif_pci_irq_set_affinity_hint(hif_ext_group);
 	}
+	/* Set IRQ affinity for CE interrupts*/
+	hif_pci_ce_irq_set_affinity_hint(scn);
 }
 
 int hif_pci_configure_grp_irq(struct hif_softc *scn,
@@ -3982,7 +4024,8 @@ QDF_STATUS hif_pci_enable_bus(struct hif_softc *ol_sc,
 			  enum hif_enable_type type)
 {
 	int ret = 0;
-	uint32_t hif_type, target_type;
+	uint32_t hif_type;
+	uint32_t target_type = TARGET_TYPE_UNKNOWN;
 	struct hif_pci_softc *sc = HIF_GET_PCI_SOFTC(ol_sc);
 	struct hif_opaque_softc *hif_hdl = GET_HIF_OPAQUE_HDL(ol_sc);
 	uint16_t revision_id = 0;
@@ -3991,8 +4034,6 @@ QDF_STATUS hif_pci_enable_bus(struct hif_softc *ol_sc,
 	const struct pci_device_id *id = (const struct pci_device_id *)bid;
 	struct hif_target_info *tgt_info;
 
-	g_gic_irq_num = exynos_pcie_get_irq_num(0);
-	HIF_ERROR("%s: get pci irq number = %d", __func__, g_gic_irq_num);
 	if (!ol_sc) {
 		HIF_ERROR("%s: hif_ctx is NULL", __func__);
 		return QDF_STATUS_E_NOMEM;
@@ -5017,23 +5058,22 @@ int hif_force_wake_request(struct hif_opaque_softc *hif_handle)
 	struct hif_softc *scn = (struct hif_softc *)hif_handle;
 	struct hif_pci_softc *pci_scn = HIF_GET_PCI_SOFTC(scn);
 
-	if (pld_force_wake_request(scn->qdf_dev->dev)) {
-		hif_err("force wake request send failed");
-		return -EINVAL;
-	}
-
 	HIF_STATS_INC(pci_scn, mhi_force_wake_request_vote, 1);
-	while (!pld_is_device_awake(scn->qdf_dev->dev) &&
-	       timeout <= FORCE_WAKE_DELAY_TIMEOUT_MS) {
-		qdf_mdelay(FORCE_WAKE_DELAY_MS);
-		timeout += FORCE_WAKE_DELAY_MS;
-	}
 
-	if (pld_is_device_awake(scn->qdf_dev->dev) <= 0) {
-		hif_err("Unable to wake up mhi");
+	if (pld_force_wake_request_sync(scn->qdf_dev->dev,
+					FORCE_WAKE_DELAY_TIMEOUT_MS * 1000)) {
+		hif_err("force wake request send failed");
 		HIF_STATS_INC(pci_scn, mhi_force_wake_failure, 1);
 		return -EINVAL;
 	}
+
+	/* If device's M1 state-change event races here, it can be ignored,
+	 * as the device is expected to immediately move from M2 to M0
+	 * without entering low power state.
+	 */
+	if (!pld_is_device_awake(scn->qdf_dev->dev))
+		HIF_INFO("%s: state-change event races, ignore", __func__);
+
 	HIF_STATS_INC(pci_scn, mhi_force_wake_success, 1);
 	hif_write32_mb(scn,
 		       scn->mem +
@@ -5078,28 +5118,27 @@ int hif_force_wake_request(struct hif_opaque_softc *hif_handle)
  */
 int hif_force_wake_request(struct hif_opaque_softc *hif_handle)
 {
-	uint32_t timeout = 0;
 	struct hif_softc *scn = (struct hif_softc *)hif_handle;
 	struct hif_pci_softc *pci_scn = HIF_GET_PCI_SOFTC(scn);
 
-	if (pld_force_wake_request(scn->qdf_dev->dev)) {
-		hif_err("force wake request send failed");
-		return -EINVAL;
-	}
-
 	HIF_STATS_INC(pci_scn, mhi_force_wake_request_vote, 1);
-	while (!pld_is_device_awake(scn->qdf_dev->dev) &&
-	       timeout <= FORCE_WAKE_DELAY_TIMEOUT_MS) {
-		qdf_mdelay(FORCE_WAKE_DELAY_MS);
-		timeout += FORCE_WAKE_DELAY_MS;
-	}
 
-	if (pld_is_device_awake(scn->qdf_dev->dev) <= 0) {
-		hif_err("Unable to wake up mhi");
+	if (pld_force_wake_request_sync(scn->qdf_dev->dev,
+					FORCE_WAKE_DELAY_TIMEOUT_MS * 1000)) {
+		hif_err("force wake request send failed");
 		HIF_STATS_INC(pci_scn, mhi_force_wake_failure, 1);
 		return -EINVAL;
 	}
+
+	/* If device's M1 state-change event races here, it can be ignored,
+	 * as the device is expected to immediately move from M2 to M0
+	 * without entering low power state.
+	 */
+	if (!pld_is_device_awake(scn->qdf_dev->dev))
+		HIF_INFO("%s: state-change event races, ignore", __func__);
+
 	HIF_STATS_INC(pci_scn, mhi_force_wake_success, 1);
+
 	return 0;
 }
 #endif /* DEVICE_FORCE_WAKE_ENABLE */

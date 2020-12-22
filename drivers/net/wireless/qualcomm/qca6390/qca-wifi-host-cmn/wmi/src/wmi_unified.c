@@ -3116,6 +3116,18 @@ bool wmi_is_target_suspended(struct wmi_unified *wmi_handle)
 	return qdf_atomic_read(&wmi_handle->is_target_suspended);
 }
 
+#ifdef WLAN_FEATURE_WMI_SEND_RECV_QMI
+void wmi_set_qmi_stats(wmi_unified_t wmi_handle, bool val)
+{
+	wmi_handle->is_qmi_stats_enabled = val;
+}
+
+bool wmi_is_qmi_stats_enabled(struct wmi_unified *wmi_handle)
+{
+	return wmi_handle->is_qmi_stats_enabled;
+}
+#endif
+
 /**
  * WMI API to set crash injection state
  * @param wmi_handle:	handle to WMI.
@@ -3153,8 +3165,6 @@ wmi_stop(wmi_unified_t wmi_handle)
 	QDF_TRACE(QDF_MODULE_ID_WMI, QDF_TRACE_LEVEL_INFO,
 		  "WMI Stop");
 	wmi_handle->wmi_stopinprogress = 1;
-	pr_err("wmi_enable 199\n");
-	enable_irq(199);
 	return 0;
 }
 

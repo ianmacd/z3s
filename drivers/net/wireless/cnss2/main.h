@@ -336,6 +336,7 @@ enum cnss_ce_index {
 	CNSS_CE_COMMON,
 };
 
+#define DUMP_MAX_SEG 20
 struct cnss_plat_data {
 	struct platform_device *plat_dev;
 	void *bus_priv;
@@ -412,6 +413,12 @@ struct cnss_plat_data {
 	u8 set_wlaon_pwr_ctrl;
 	struct kobject *shutdown_kobj;
 	struct kobject *wifi_kobj;
+	u32 num_dump_segs;
+	struct cnss_dump_seg dump_segs[DUMP_MAX_SEG * CNSS_FW_DUMP_TYPE_MAX + CNSS_FW_DUMP_TYPE_MAX + 1];
+	atomic_t dump_status;
+	struct completion dump_complete;
+	int devcoredump_status;
+	struct mutex force_assert_lock;
 };
 
 #ifdef CONFIG_ARCH_QCOM
@@ -435,6 +442,8 @@ static inline u64 cnss_get_host_timestamp(struct cnss_plat_data *plat_priv)
 #endif
 
 struct cnss_plat_data *cnss_get_plat_priv(struct platform_device *plat_dev);
+void cnss_pm_stay_awake(struct cnss_plat_data *plat_priv);
+void cnss_pm_relax(struct cnss_plat_data *plat_priv);
 int cnss_driver_event_post(struct cnss_plat_data *plat_priv,
 			   enum cnss_driver_event_type type,
 			   u32 flags, void *data);

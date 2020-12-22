@@ -553,7 +553,7 @@ int sensor_imx616_cis_init(struct v4l2_subdev *subdev)
 	dbg_sensor(1, "[%s] max dgain : %d\n", __func__, setinfo.return_value);
 #endif
 
-#if SENSOR_IMX616_SENSOR_CAL_FOR_REMOSAIC
+#if 0 /* SENSOR_IMX616_SENSOR_CAL_FOR_REMOSAIC */  /* move to mode_change */
 	if (sensor_imx616_cal_write_flag == false) {
 		sensor_imx616_cal_write_flag = true;
 
@@ -778,7 +778,7 @@ int sensor_imx616_cis_mode_change(struct v4l2_subdev *subdev, u32 mode)
 		info("[%s] cis_rev=%#x\n", __func__, cis->cis_data->cis_rev);
 	}
 
-#if 0 /* SENSOR_IMX616_SENSOR_CAL_FOR_REMOSAIC */
+#if SENSOR_IMX616_SENSOR_CAL_FOR_REMOSAIC
 	if (IS_REMOSAIC(mode) && sensor_imx616_cal_write_flag == false) {
 		sensor_imx616_cal_write_flag = true;
 

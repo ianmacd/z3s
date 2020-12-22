@@ -472,6 +472,14 @@ static const char *extra_string(enum extra event)
 		return "USB ANALOG AUDIO";
 	case NOTIFY_EXTRA_USBHOST_OVERCURRENT:
 		return "USB HOST OVERCURRENT";
+	case NOTIFY_EXTRA_ROOTHUB_SUSPEND_FAIL:
+		return "ROOTHUB SUSPEND FAIL";
+	case NOTIFY_EXTRA_PORT_SUSPEND_FAIL:
+		return "PORT SUSPEND FAIL";
+	case NOTIFY_EXTRA_PORT_SUSPEND_WAKEUP_FAIL:
+		return "PORT REMOTE WAKEUP FAIL";
+	case NOTIFY_EXTRA_PORT_SUSPEND_LTM_FAIL:
+		return "PORT LTM FAIL";
 	default:
 		return "ETC";
 	}
@@ -1180,7 +1188,7 @@ void state_store_usblog_notify(int type, char *param1)
 	unsigned long *target_index;
 	char buf[256], index, index2, index3;
 	char *b, *name;
-	int usbstate;
+	int usbstate = 0;
 
 	target_count = &usblog_root.usblog_buffer->state_count;
 	target_index = &usblog_root.usblog_buffer->state_index;

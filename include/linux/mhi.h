@@ -351,6 +351,7 @@ struct reg_write_info {
  * @rddm_size: RAM dump size that host should allocate for debugging purpose
  * @sbl_size: SBL image size
  * @seg_len: BHIe vector size
+ * @img_pre_alloc: allocate rddm and fbc image buffers one time
  * @fbc_image: Points to firmware image buffer
  * @rddm_image: Points to RAM dump buffer
  * @max_chan: Maximum number of channels controller support
@@ -421,6 +422,8 @@ struct mhi_controller {
 	size_t seg_len;
 	u32 session_id;
 	u32 sequence_id;
+
+	bool img_pre_alloc;
 	struct image_info *fbc_image;
 	struct image_info *rddm_image;
 
@@ -735,6 +738,30 @@ void mhi_device_get(struct mhi_device *mhi_dev, int vote);
 int mhi_device_get_sync(struct mhi_device *mhi_dev, int vote);
 
 /**
+ * mhi_device_get_sync_atomic - Asserts device_wait and moves device to M0
+ * @mhi_dev: Device associated with the channels
+ * @timeout_us: timeout, in micro-seconds
+ *
+ * The device_wake is asserted to keep device in M0 or bring it to M0.
+ * If device is not in M0 state, then this function will wait for device to
+ * move to M0, until @timeout_us elapses.
+ * However, if device's M1 state-change event races with this function
+ * then there is a possiblity of device moving from M0 to M2 and back
+ * to M0. That can't be avoided as host must transition device from M1 to M2
+ * as per the spec.
+ * Clients can ignore that transition after this function returns as the device
+ * is expected to immediately  move from M2 to M0 as wake is asserted and
+ * wouldn't enter low power state.
+ *
+ * Returns:
+ * 0 if operation was successful (however, M0 -> M2 -> M0 is possible later) as
+ * mentioned above.
+ * -ETIMEDOUT is device faled to move to M0 before @timeout_us elapsed
+ * -EIO if the MHI state is one of the ERROR states.
+ */
+int mhi_device_get_sync_atomic(struct mhi_device *mhi_dev, int timeout_us);
+
+/**
  * mhi_device_put - re-enable low power modes
  * @mhi_dev: Device associated with the channels
  * @vote: vote to remove
@@ -936,6 +963,12 @@ int mhi_get_remote_time_sync(struct mhi_device *mhi_dev,
 			     u64 *t_dev);
 
 /**
+ * mhi_get_exec_env - Return execution environment of the device
+ * @mhi_cntrl: MHI controller
+ */
+enum mhi_ee mhi_get_exec_env(struct mhi_controller *mhi_cntrl);
+
+/**
  * mhi_get_mhi_state - Return MHI state of device
  * @mhi_cntrl: MHI controller
  */
@@ -981,6 +1014,13 @@ void mhi_debug_reg_dump(struct mhi_controller *mhi_cntrl);
  * @name: controller name
  */
 char *mhi_get_restart_reason(const char *name);
+
+/**
+ * mhi_irq_setup - Enable/Disable MHI MSIs
+ * @mhi_cntrl: MHI controller
+ * @enable: enable/disable irq
+ */
+void mhi_irq_setup(struct mhi_controller *mhi_cntrl, bool enable);
 
 #ifndef CONFIG_ARCH_QCOM
 

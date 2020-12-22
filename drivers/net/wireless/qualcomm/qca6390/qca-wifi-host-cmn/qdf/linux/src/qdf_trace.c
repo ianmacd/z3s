@@ -26,6 +26,10 @@
 #include "qdf_str.h"
 #include <qdf_trace.h>
 #include <qdf_module.h>
+#ifdef CONFIG_ARCH_EXYNOS9
+#include "cds_api.h"
+#include "pld_common.h"
+#endif
 
 /* macro to map qdf trace levels into the bitmask */
 #define QDF_TRACE_LEVEL_TO_MODULE_BITMASK(_level) ((1 << (_level)))
@@ -1557,13 +1561,15 @@ void qdf_dp_log_proto_pkt_info(uint8_t *sa, uint8_t *da, uint8_t type,
 		last_ticks_rx[subtype] = curr_ticks;
 
 	if (status == QDF_TX_RX_STATUS_INVALID)
-		qdf_nofl_info("%s %s: SA:%pM DA:%pM",
+		qdf_nofl_info("%s %s: SA:"QDF_MAC_ADDR_FMT" DA:"QDF_MAC_ADDR_FMT,
 			      qdf_get_pkt_type_string(type, subtype),
-			      dir ? "RX":"TX", sa, da);
+			      dir ? "RX":"TX", QDF_MAC_ADDR_REF(sa),
+			      QDF_MAC_ADDR_REF(da));
 	else
-		qdf_nofl_info("%s %s: SA:%pM DA:%pM msdu_id:%d status: %s",
+		qdf_nofl_info("%s %s: SA:"QDF_MAC_ADDR_FMT" DA:"QDF_MAC_ADDR_FMT" msdu_id:%d status: %s",
 			      qdf_get_pkt_type_string(type, subtype),
-			      dir ? "RX":"TX", sa, da, msdu_id,
+			      dir ? "RX":"TX", QDF_MAC_ADDR_REF(sa),
+			      QDF_MAC_ADDR_REF(da), msdu_id,
 			      qdf_get_pkt_status_string(status));
 }
 
@@ -2084,14 +2090,14 @@ void qdf_dp_display_proto_pkt(struct qdf_dp_trace_record_s *record,
 	loc = qdf_dp_trace_fill_meta_str(prepend_str, sizeof(prepend_str),
 					 index, info, record);
 	DPTRACE_PRINT("%s [%d] [%s] SA: "
-		      QDF_MAC_ADDR_STR " %s DA: "
-		      QDF_MAC_ADDR_STR,
+		      QDF_MAC_ADDR_FMT " %s DA: "
+		      QDF_MAC_ADDR_FMT,
 		      prepend_str,
 		      buf->vdev_id,
 		      qdf_dp_subtype_to_str(buf->subtype),
-		      QDF_MAC_ADDR_ARRAY(buf->sa.bytes),
+		      QDF_MAC_ADDR_REF(buf->sa.bytes),
 		      qdf_dp_dir_to_str(buf->dir),
-		      QDF_MAC_ADDR_ARRAY(buf->da.bytes));
+		      QDF_MAC_ADDR_REF(buf->da.bytes));
 }
 qdf_export_symbol(qdf_dp_display_proto_pkt);
 
@@ -2546,14 +2552,14 @@ static void qdf_dpt_display_proto_pkt_debugfs(qdf_debugfs_file_t file,
 	loc = qdf_dp_trace_fill_meta_str(prepend_str, sizeof(prepend_str),
 					 index, 0, record);
 	qdf_debugfs_printf(file, "%s [%d] [%s] SA: "
-			   QDF_MAC_ADDR_STR " %s DA: "
-			   QDF_MAC_ADDR_STR,
+			   QDF_MAC_ADDR_FMT " %s DA: "
+			   QDF_MAC_ADDR_FMT,
 			   prepend_str,
 			   buf->vdev_id,
 			   qdf_dp_subtype_to_str(buf->subtype),
-			   QDF_MAC_ADDR_ARRAY(buf->sa.bytes),
+			   QDF_MAC_ADDR_REF(buf->sa.bytes),
 			   qdf_dp_dir_to_str(buf->dir),
-			   QDF_MAC_ADDR_ARRAY(buf->da.bytes));
+			   QDF_MAC_ADDR_REF(buf->da.bytes));
 	qdf_debugfs_printf(file, "\n");
 }
 
@@ -3977,12 +3983,34 @@ int qdf_get_pidx(void)
 qdf_export_symbol(qdf_get_pidx);
 
 #ifdef PANIC_ON_BUG
-#ifdef CONFIG_SLUB_DEBUG
+/* CONFIG_ARCH_EXYNOS9 Remove SLUB DEBUG qcacmn: issue force assert instead of triggering panic */
+//#ifdef CONFIG_SLUB_DEBUG
+
+#ifdef CONFIG_ARCH_EXYNOS9
+void __qdf_bug(void)
+{
+	qdf_device_t qdf;
+
+	qdf = cds_get_context(QDF_MODULE_ID_QDF_DEVICE);
+	if (!qdf) {
+		pr_err("Qdf context is null");
+		return;
+	}
+
+	pr_err("%s: pld_force_assert_target\n", __func__);
+	pld_force_assert_target(qdf->dev);
+	pr_err("%s: sleep 5 seconds\n", __func__);
+	msleep(5000);
+}
+
+#else
 void __qdf_bug(void)
 {
 	BUG();
 }
+#endif /*CONFIG_ARCH_EXYNOS9*/
 qdf_export_symbol(__qdf_bug);
-#endif /* CONFIG_SLUB_DEBUG */
+/* CONFIG_ARCH_EXYNOS9 Remove SLUB DEBUG qcacmn: issue force assert instead of triggering panic */
+//#endif /* CONFIG_SLUB_DEBUG */
 #endif /* PANIC_ON_BUG */
 

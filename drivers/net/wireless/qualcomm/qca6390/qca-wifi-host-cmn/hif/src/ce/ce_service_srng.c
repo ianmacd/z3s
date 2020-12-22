@@ -740,7 +740,7 @@ static void ce_srng_msi_ring_params_setup(struct hif_softc *scn, uint32_t ce_id,
 	ring_params->flags |= HAL_SRNG_MSI_INTR;
 #else
 	ring_params->msi_data = (ce_id % msi_data_count) + msi_data_start;
-	ring_params->flags |= HAL_SRNG_MSI_INTR;
+	//ring_params->flags |= HAL_SRNG_MSI_INTR;
 #endif
 
 	HIF_DBG("%s: ce_id %d, msi_addr %pK, msi_data %d", __func__, ce_id,

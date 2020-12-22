@@ -656,7 +656,11 @@ static ssize_t window_type_show(struct device *dev,
 static ssize_t manufacture_code_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
+#ifdef CONFIG_PANEL_MAGNA_DDI
+	u8 code[6] = { 0, };
+#else
 	u8 code[5] = { 0, };
+#endif
 	struct panel_info *panel_data;
 	struct panel_device *panel = dev_get_drvdata(dev);
 
@@ -668,8 +672,13 @@ static ssize_t manufacture_code_show(struct device *dev,
 
 	resource_copy_by_name(panel_data, code, "code");
 
+#ifdef CONFIG_PANEL_MAGNA_DDI
+	snprintf(buf, PAGE_SIZE, "%02X%02X%02X%02X%02X%02X\n",
+		code[0], code[1], code[2], code[3], code[4], code[5]);
+#else
 	snprintf(buf, PAGE_SIZE, "%02X%02X%02X%02X%02X\n",
 		code[0], code[1], code[2], code[3], code[4]);
+#endif
 
 	return strlen(buf);
 }
@@ -2317,10 +2326,15 @@ static int set_alpm_mode(struct panel_device *panel, int mode)
 #endif
 #ifdef CONFIG_SUPPORT_AOD_BL
 		if (lpm_ver == 0) {
+			mutex_lock(&panel_bl->lock);
+			mutex_lock(&panel->op_lock);
 			bd->props.brightness =
 				(lpm_mode <= HLPM_LOW_BR) ? BRT(0) : BRT(94);
 			panel_bl->subdev[PANEL_BL_SUBDEV_TYPE_AOD].brightness =
 				(lpm_mode <= HLPM_LOW_BR) ? BRT(0) : BRT(94);
+			mutex_unlock(&panel->op_lock);
+			mutex_unlock(&panel_bl->lock);
+
 		}
 #endif
 #ifdef CONFIG_SEC_FACTORY
@@ -3993,6 +4007,92 @@ static ssize_t vrr_show(struct device *dev,
 	return strlen(buf);
 }
 
+#if defined(CONFIG_PANEL_DISPLAY_MODE)
+static ssize_t display_mode_show(struct device *dev,
+		    struct device_attribute *attr, char *buf)
+{
+	struct panel_device *panel = dev_get_drvdata(dev);
+	struct panel_display_modes *panel_modes;
+	struct common_panel_display_modes *common_panel_modes;
+	struct panel_properties *props;
+	int i, len = 0;
+
+	if (panel == NULL) {
+		panel_err("panel is null\n");
+		return -EINVAL;
+	}
+
+	props = &panel->panel_data.props;
+	panel_modes = panel->panel_modes;
+	if (!panel->panel_modes) {
+		len += snprintf(buf + len, PAGE_SIZE - len,
+				"panel_display_modes empty!!\n");
+	} else {
+		for (i = 0; i < panel_modes->num_modes; i++) {
+			if (!panel_modes->modes[i])
+				continue;
+			len += snprintf(buf + len, PAGE_SIZE - len, "pdm:%d %s\n",
+					i, panel_modes->modes[i]->name);
+		}
+	}
+
+	common_panel_modes = panel->panel_data.common_panel_modes;
+	if (!common_panel_modes) {
+		len += snprintf(buf + len, PAGE_SIZE - len,
+				"common_panel_display_modes empty!!\n");
+	} else {
+		for (i = 0; i < common_panel_modes->num_modes; i++) {
+			if (!common_panel_modes->modes[i])
+				continue;
+			len += snprintf(buf + len, PAGE_SIZE - len, "cpdm:%d %s\n",
+					i, common_panel_modes->modes[i]->name);
+		}
+	}
+	len += snprintf(buf + len, PAGE_SIZE - len, "panel_mode:%d\n",
+			props->panel_mode);
+
+
+	return len;
+}
+
+static ssize_t display_mode_store(struct device *dev,
+		    struct device_attribute *attr, const char *buf, size_t size)
+{
+	struct panel_device *panel = dev_get_drvdata(dev);
+	struct common_panel_display_modes *common_panel_modes;
+	struct panel_properties *props;
+	int rc, panel_mode = 0;
+
+	if (panel == NULL) {
+		panel_err("panel is null\n");
+		return -EINVAL;
+	}
+
+	props = &panel->panel_data.props;
+	common_panel_modes = panel->panel_data.common_panel_modes;
+	rc = kstrtoint(buf, 0, &panel_mode);
+	if (rc < 0)
+		return -EINVAL;
+
+	mutex_lock(&panel->op_lock);
+	if (panel_mode < 0 ||
+			panel_mode >= common_panel_modes->num_modes) {
+		panel_err("panel_mode(%d) exceeded num_modes(%d)\n",
+				panel_mode, common_panel_modes->num_modes);
+		mutex_unlock(&panel->op_lock);
+		return -EINVAL;
+	}
+
+	props->panel_mode = panel_mode;
+	mutex_unlock(&panel->op_lock);
+	rc = panel_update_display_mode(panel);
+	if (rc < 0)
+		panel_err("failed to panel_update_display_mode\n");
+
+	return size;
+}
+#endif
+
 #ifdef CONFIG_PANEL_VRR_BRIDGE
 static ssize_t vrr_bridge_show(struct device *dev,
 		    struct device_attribute *attr, char *buf)
@@ -4083,10 +4183,10 @@ ssize_t snprint_vrr_lfd(struct panel_device *panel, char *buf, ssize_t size)
 		len += snprintf(buf + len, size - len,
 				"scope=%s lfd:%d~%dHz div:%d~%d(fix=%d scalability=%d min=%d max=%d)\n",
 				scope_name,
-				panel->panel_data.props.vrr_lfd_info.lfd_min_freq,
-				panel->panel_data.props.vrr_lfd_info.lfd_max_freq,
-				panel->panel_data.props.vrr_lfd_info.lfd_min_freq_div,
-				panel->panel_data.props.vrr_lfd_info.lfd_max_freq_div,
+				props->vrr_lfd_info.status[scope].lfd_min_freq,
+				props->vrr_lfd_info.status[scope].lfd_max_freq,
+				props->vrr_lfd_info.status[scope].lfd_min_freq_div,
+				props->vrr_lfd_info.status[scope].lfd_max_freq_div,
 				props->vrr_lfd_info.cur[scope].fix,
 				props->vrr_lfd_info.cur[scope].scalability,
 				props->vrr_lfd_info.cur[scope].min,
@@ -4617,6 +4717,9 @@ struct device_attribute panel_attrs[] = {
 	__PANEL_ATTR_RW(spi_flash_ctrl, 0660),
 #endif
 	__PANEL_ATTR_RO(vrr, 0444),
+#if defined(CONFIG_PANEL_DISPLAY_MODE)
+	__PANEL_ATTR_RW(display_mode, 0664),
+#endif
 #ifdef CONFIG_PANEL_VRR_BRIDGE
 	__PANEL_ATTR_RW(vrr_bridge, 0664),
 #endif
