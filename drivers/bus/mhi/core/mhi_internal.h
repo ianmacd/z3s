@@ -721,6 +721,8 @@ struct mhi_bus {
 
 /* default MHI timeout */
 #define MHI_TIMEOUT_MS (1000)
+#define MHI_FORCE_WAKE_DELAY_US (100)
+
 extern struct mhi_bus mhi_bus;
 
 struct mhi_controller *find_mhi_controller_by_name(const char *name);
@@ -766,8 +768,6 @@ int mhi_process_bw_scale_ev_ring(struct mhi_controller *mhi_cntrl,
 int mhi_send_cmd(struct mhi_controller *mhi_cntrl, struct mhi_chan *mhi_chan,
 		 enum MHI_CMD cmd);
 int __mhi_device_get_sync(struct mhi_controller *mhi_cntrl);
-void mhi_ctrl_ev_process(struct mhi_controller *mhi_cntrl,
-	struct mhi_event *mhi_event);
 
 static inline void mhi_trigger_resume(struct mhi_controller *mhi_cntrl)
 {
@@ -914,7 +914,7 @@ void mhi_create_devices(struct mhi_controller *mhi_cntrl);
 int mhi_alloc_bhie_table(struct mhi_controller *mhi_cntrl,
 			 struct image_info **image_info, size_t alloc_size);
 void mhi_free_bhie_table(struct mhi_controller *mhi_cntrl,
-			 struct image_info *image_info);
+			 struct image_info **image_info);
 
 int mhi_map_single_no_bb(struct mhi_controller *mhi_cntrl,
 			 struct mhi_buf_info *buf_info);
@@ -934,6 +934,7 @@ int mhi_init_mmio(struct mhi_controller *mhi_cntrl);
 int mhi_init_dev_ctxt(struct mhi_controller *mhi_cntrl);
 void mhi_deinit_dev_ctxt(struct mhi_controller *mhi_cntrl);
 int mhi_init_irq_setup(struct mhi_controller *mhi_cntrl);
+void mhi_irq_setup(struct mhi_controller *mhi_cntrl, bool enable);
 void mhi_deinit_free_irq(struct mhi_controller *mhi_cntrl);
 int mhi_dtr_init(void);
 void mhi_rddm_prepare(struct mhi_controller *mhi_cntrl,

@@ -23,6 +23,9 @@
 #define RT8547_MOVIE_CURRENT(mA) (((mA)-25)/25)
 #define RT8547_MOVIE_REG(val) (((val)*25)+25)
 
+#define RT8547_INTENSITY_MIN 100
+#define RT8547_INTENSITY_MAX 1600
+
 #define LED_ERROR(x, ...) printk(KERN_ERR "%s : " x, __func__, ##__VA_ARGS__)
 #define LED_INFO(x, ...) printk(KERN_INFO "%s : " x, __func__, ##__VA_ARGS__)
 #define LED_CHECK_ERR_GOTO(x, out, fmt, ...) \
@@ -43,12 +46,16 @@
 #define RT8547_ADDR_FLASH_CURRENT_LEVEL_TIMEOUT_SETTING	0x2
 #define RT8547_ADDR_CURRENT_SETTING	0x3
 #define RT8547_ADDR_FLASH_TIMEOUT_SETTING	0x4
+#define RT8547_ADDR_HIDDEN_SETTING 0x7
 
 #define RT8547_SLAVE_ADDR 0x99
 
 #define RT8547_SW_RESET 0x20
 #define RT8547_TORCH_SELECT 0x10
-#define RT8547_STROBE_SELECT 0x0f
+#define RT8547_STROBE_SELECT 0x00
+
+#define RT8547_HIDDEN_DEFAULT 0x67
+#define RT8547_HIDDEN_LVP_DISABLE 0x27
 
 #define T_SHORT		4			/* us */
 #define T_LONG		60			/* us*/
@@ -153,6 +160,7 @@ struct rt8547_platform_data {
 	int sysfs_input_data;
 	int flash_control;
 	int flash_en;
+	int flash_movie_en;
 	struct workqueue_struct *wqueue;
 	enum rt8547_LVPsetting_t LVP_Voltage;
 	enum rt8547_timer_t flash_timeout;
@@ -167,5 +175,6 @@ struct rt8547_platform_data {
 
 extern int32_t rt8547_led_mode_ctrl(int state);
 extern int32_t rt8547_led_set_torch(int curr);
+extern int32_t rt8547_set_flash_current(int intensity);
 
 #endif

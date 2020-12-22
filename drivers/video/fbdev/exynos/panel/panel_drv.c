@@ -66,6 +66,10 @@
 #include "./df/dynamic_freq.h"
 #endif
 
+#ifdef CONFIG_PANEL_DECON_BOARD
+#include "./decon_board.h"
+#endif
+
 static char *panel_state_names[] = {
 	"OFF",		/* POWER OFF */
 	"ON",		/* POWER ON */
@@ -143,7 +147,7 @@ static char *panel_regulator_names[PANEL_REGULATOR_MAX] = {
 #endif
 };
 
-static int boot_panel_id;
+int boot_panel_id;
 int panel_log_level = 6;
 int panel_cmd_log;
 #ifdef CONFIG_SUPPORT_PANEL_SWAP
@@ -332,6 +336,7 @@ int panel_set_gpio_irq(struct panel_gpio *gpio, bool enable)
 	return 0;
 }
 
+#ifndef CONFIG_PANEL_DECON_BOARD
 static int panel_regulator_enable(struct panel_device *panel)
 {
 	struct panel_regulator *regulator = panel->regulator;
@@ -378,6 +383,7 @@ static int panel_regulator_disable(struct panel_device *panel)
 
 	return 0;
 }
+#endif
 
 static int panel_regulator_set_voltage(struct panel_device *panel, int state)
 {
@@ -523,6 +529,28 @@ static inline int panel_regulator_set_short_detection(struct panel_device *panel
 }
 #endif
 
+#ifdef CONFIG_PANEL_DECON_BOARD
+int __set_panel_power(struct panel_device *panel, int power)
+{
+	if (panel->state.power == power) {
+		panel_warn("same status.. skip..\n");
+		return 0;
+	}
+
+	if (power == PANEL_POWER_ON)
+		run_list(panel->dev, "panel_power_enable");
+	else
+		run_list(panel->dev, "panel_power_disable");
+
+	panel_info("power(%s) gpio_reset(%s)\n",
+			power == PANEL_POWER_ON ? "on" : "off",
+			of_gpio_get_value("gpio_lcd_rst") ? "high" : "low");
+
+	panel->state.power = power;
+
+	return 0;
+}
+#else
 int __set_panel_power(struct panel_device *panel, int power)
 {
 	int ret = 0;
@@ -561,6 +589,7 @@ int __set_panel_power(struct panel_device *panel, int power)
 
 	return 0;
 }
+#endif
 
 static int __panel_seq_display_on(struct panel_device *panel)
 {
@@ -2381,8 +2410,8 @@ int panel_vrr_cb(struct panel_device *panel)
 	dms_data.fps = vrr->fps /
 		max(TE_SKIP_TO_DIV(vrr->te_sw_skip_count,
 					vrr->te_hw_skip_count), MIN_VRR_DIV_COUNT);
-	dms_data.lfd_min_freq = props->vrr_lfd_info.lfd_min_freq;
-	dms_data.lfd_max_freq = props->vrr_lfd_info.lfd_max_freq;
+	dms_data.lfd_min_freq = props->vrr_lfd_info.status[VRR_LFD_SCOPE_NORMAL].lfd_min_freq;
+	dms_data.lfd_max_freq = props->vrr_lfd_info.status[VRR_LFD_SCOPE_NORMAL].lfd_max_freq;
 
 	/* notify clients that vrr has changed */
 	if (old_dms_data.fps != dms_data.fps) {
@@ -2687,15 +2716,6 @@ static int panel_seq_display_mode(struct panel_device *panel)
 
 	if (!check_display_mode_cond(panel))
 		return -EINVAL;
-
-	/*
-	 * applying display mode is permitted in normal state
-	 */
-	if (panel->state.cur_state != PANEL_STATE_NORMAL) {
-		panel_warn("could not change display mode in %s state\n",
-				panel_state_names[panel->state.cur_state]);
-		return 0;
-	}
 
 	ret = panel_do_seqtbl_by_index_nolock(panel,
 			PANEL_DISPLAY_MODE_SEQ);
@@ -3024,19 +3044,46 @@ static int panel_powerdown_cb(struct panel_device *panel)
 }
 #endif
 
+/* PANEL_SMOOTH_DIM_TIME : 10 frames time (60Hz) (smooth dim 8frames) */
+#define PANEL_SMOOTH_DIM_TIME ( 16700 * 10 )
+
 #ifdef CONFIG_SUPPORT_MASK_LAYER
 static int panel_set_mask_layer(struct panel_device *panel, void *arg)
 {
 	int ret = 0;
 	struct panel_bl_device *panel_bl = &panel->panel_bl;
 	struct mask_layer_data *req_data = (struct mask_layer_data *)arg;
+	u64 us_time_delta = 0;
 
 	if (req_data->req_mask_layer == MASK_LAYER_ON) {
 		if (req_data->trigger_time  == MASK_LAYER_TRIGGER_BEFORE) {
 
+			/*
+			 * W/A - During smooth dimming transition,
+			 * HBM entering can be faster than we expected.
+			 * Smooth dimming transition should stop here.
+			 */
+
+			/* 0. STOP SMOOTH DIMMING */
+			mutex_lock(&panel_bl->lock);
+			if (check_seqtbl_exist(&panel->panel_data, PANEL_MASK_LAYER_STOP_DIMMING_SEQ)) {
+				us_time_delta = ktime_us_delta(ktime_get(), panel_bl->props.last_br_update_time);
+
+				if ( us_time_delta < PANEL_SMOOTH_DIM_TIME ) {
+					panel_info("elapsed(%2lld.%03lldmsec) smooth dim force off.\n",
+						us_time_delta / 1000, us_time_delta % 1000);
+
+					panel_do_seqtbl_by_index(panel, PANEL_MASK_LAYER_BEFORE_SEQ);
+					panel_bl->props.smooth_transition = SMOOTH_TRANS_OFF;
+					mutex_unlock(&panel_bl->lock);
+					panel_update_brightness(panel);
+					mutex_lock(&panel_bl->lock);
+					panel_do_seqtbl_by_index(panel, PANEL_MASK_LAYER_STOP_DIMMING_SEQ);
+				}
+			}
+
 			/* 1. REQ ON + FRAME START BEFORE */
 			panel_do_seqtbl_by_index(panel, PANEL_MASK_LAYER_BEFORE_SEQ);
-			mutex_lock(&panel_bl->lock);
 			panel_bl->props.mask_layer_br_hook = MASK_LAYER_HOOK_ON;
 			panel_bl->props.smooth_transition = SMOOTH_TRANS_OFF;
 			mutex_unlock(&panel_bl->lock);
@@ -3054,12 +3101,12 @@ static int panel_set_mask_layer(struct panel_device *panel, void *arg)
 		if (req_data->trigger_time  == MASK_LAYER_TRIGGER_BEFORE) {
 
 			/* 3. REQ OFF + FRAME START BEFORE */
-			panel_do_seqtbl_by_index(panel, PANEL_MASK_LAYER_BEFORE_SEQ);
 			mutex_lock(&panel_bl->lock);
+			panel_do_seqtbl_by_index(panel, PANEL_MASK_LAYER_BEFORE_SEQ);
 			panel_bl->props.mask_layer_br_hook = MASK_LAYER_HOOK_OFF;
 			mutex_unlock(&panel_bl->lock);
 			panel_update_brightness(panel);
-
+			panel_do_seqtbl_by_index(panel, PANEL_MASK_LAYER_AFTER_SEQ);
 		} else if  (req_data->trigger_time  == MASK_LAYER_TRIGGER_AFTER)  {
 
 			/* 4. REQ OFF + FRAME START AFTER */
@@ -3223,7 +3270,12 @@ static long panel_core_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg
 			panel_check_ready(panel);
 		}
 		if (unlikely(panel_get_gpio_irq(&panel->gpio[PANEL_GPIO_DISP_DET]) == false)) {
+#if defined(CONFIG_SEC_FACTORY) && defined(CONFIG_SUPPORT_FAST_DISCHARGE)
+			if (panel->panel_data.props.enable_fd == 1)
+				ret = panel_set_gpio_irq(&panel->gpio[PANEL_GPIO_DISP_DET], true);
+#else
 			ret = panel_set_gpio_irq(&panel->gpio[PANEL_GPIO_DISP_DET], true);
+#endif
 			if (ret < 0)
 				panel_warn("do not support irq\n");
 		}
@@ -3313,12 +3365,16 @@ static int panel_drv_set_gpios(struct panel_device *panel)
 		return -EINVAL;
 	}
 
+#ifdef CONFIG_PANEL_DECON_BOARD
+	rst_val = of_gpio_get_value("gpio_lcd_rst");
+#else
 	if (!gpio_is_valid(gpio[PANEL_GPIO_RESET].num)) {
 		panel_err("gpio(%s) not exist\n",
 				panel_gpio_names[PANEL_GPIO_RESET]);
 		return -EINVAL;
 	}
 	rst_val = gpio_get_value(gpio[PANEL_GPIO_RESET].num);
+#endif
 
 	if (!gpio_is_valid(gpio[PANEL_GPIO_DISP_DET].num)) {
 		panel_err("gpio(%s) not exist\n",
@@ -3362,13 +3418,21 @@ static int panel_drv_set_gpios(struct panel_device *panel)
 		panel->state.cur_state = PANEL_STATE_NORMAL;
 		panel->state.power = PANEL_POWER_ON;
 		panel->state.disp_on = PANEL_DISPLAY_ON;
+#ifdef CONFIG_PANEL_DECON_BOARD
+		of_gpio_set_value("gpio_lcd_rst", 1);
+#else
 		gpio_direction_output(gpio[PANEL_GPIO_RESET].num, 1);
+#endif
 	} else {
 		panel->state.connect_panel = PANEL_DISCONNECT;
 		panel->state.cur_state = PANEL_STATE_OFF;
 		panel->state.power = PANEL_POWER_OFF;
 		panel->state.disp_on = PANEL_DISPLAY_OFF;
+#ifdef CONFIG_PANEL_DECON_BOARD
+		of_gpio_set_value("gpio_lcd_rst", 0);
+#else
 		gpio_direction_output(gpio[PANEL_GPIO_RESET].num, 0);
+#endif
 	}
 	panel_send_ubconn_notify(panel->state.connected == PANEL_STATE_OK ?
 		PANEL_EVENT_UB_CON_CONNECTED : PANEL_EVENT_UB_CON_DISCONNECTED);
@@ -3384,6 +3448,14 @@ static int panel_drv_set_gpios(struct panel_device *panel)
 	return 0;
 }
 
+#ifdef CONFIG_PANEL_DECON_BOARD
+static int panel_drv_set_regulators(struct panel_device *panel)
+{
+	run_list(panel->dev, "panel_power_enable");
+
+	return 0;
+}
+#else
 static int panel_drv_set_regulators(struct panel_device *panel)
 {
 	int ret;
@@ -3414,6 +3486,7 @@ static int panel_drv_set_regulators(struct panel_device *panel)
 
 	return 0;
 }
+#endif
 
 static int of_get_panel_gpio(struct device_node *np, struct panel_gpio *gpio)
 {
@@ -3613,7 +3686,7 @@ int panel_register_isr(struct panel_device *panel)
 	if (panel->state.connect_panel == PANEL_DISCONNECT)
 		return -ENODEV;
 	for (i = 0; i < PANEL_GPIO_MAX; i++) {
-		if (!panel_gpio_valid(gpio) || gpio[i].irq_type <= 0)
+		if (!panel_gpio_valid(&gpio[i]) || gpio[i].irq_type <= 0)
 			continue;
 
 		for (iw = 0; iw < PANEL_WORK_MAX; iw++) {
@@ -3909,12 +3982,47 @@ void pcd_handler(struct work_struct *data)
 		struct panel_work, dwork);
 	struct panel_device *panel =
 		container_of(w, struct panel_device, work[PANEL_WORK_PCD]);
+	struct panel_gpio *gpio = panel->gpio;
+	struct panel_state *state = &panel->state;
+
+	int ret = 0;
 
 	if (ub_con_disconnected(panel))
 		return;
 
 	panel_info("+\n");
+
 	panel_check_pcd(panel);
+
+	ret = panel_set_gpio_irq(&gpio[PANEL_GPIO_PCD], false);
+	if (ret < 0)
+		panel_warn("do not support irq\n");
+
+	ret = panel_set_gpio_irq(&gpio[PANEL_GPIO_DISP_DET], false);
+	if (ret < 0)
+		panel_warn("do not support irq\n");
+
+	panel_err("PCD is abnormal state\n");
+
+	switch (state->cur_state) {
+	case PANEL_STATE_ALPM:
+	case PANEL_STATE_NORMAL:
+		ret = panel_error_cb(panel);
+		if (ret)
+			panel_err("failed to recover panel\n");
+		break;
+	default:
+		break;
+	}
+
+	ret = panel_set_gpio_irq(&gpio[PANEL_GPIO_DISP_DET], true);
+	if (ret < 0)
+		panel_warn("do not support irq\n");
+
+	ret = panel_set_gpio_irq(&gpio[PANEL_GPIO_PCD], true);
+	if (ret < 0)
+		panel_warn("do not support irq\n");
+
 	panel_info("-\n");
 }
 

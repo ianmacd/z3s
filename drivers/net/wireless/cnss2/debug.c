@@ -8,6 +8,7 @@
 #include "bus.h"
 #include "debug.h"
 #include "pci.h"
+#include "cnss_devcoredump.h"
 
 #define MMIO_REG_ACCESS_MEM_TYPE		0xFF
 
@@ -900,6 +901,14 @@ static ssize_t store_ant_info(struct kobject *kobj,
 	return 0;
 }
 
+static ssize_t store_memdump_info(struct kobject *kobj,
+			    struct kobj_attribute *attr,
+			    const char *buf,
+			    size_t count)
+{
+	cnss_pr_info("%s called\n", __func__);
+	return 0;
+}
 static struct kobj_attribute sec_mac_addr_attribute =
         __ATTR(mac_addr, 0220, NULL, store_mac_addr);
 static struct kobj_attribute sec_verinfo_sysfs_attribute =
@@ -912,6 +921,8 @@ static struct kobj_attribute sec_pminfo_sysfs_attribute =
        __ATTR(pm, 0220, NULL, store_pm_info);
 static struct kobj_attribute sec_antinfo_sysfs_attribute =
        __ATTR(ant, 0220, NULL, store_ant_info);
+static struct kobj_attribute sec_memdumpinfo_sysfs_attribute =
+	__ATTR(memdump, 0220, NULL, store_memdump_info);
 
 static struct attribute *sec_sysfs_attrs[] = {
 	&sec_mac_addr_attribute.attr,
@@ -920,6 +931,7 @@ static struct attribute *sec_sysfs_attrs[] = {
 	&qcwlanstate_attribute.attr,
 	&sec_pminfo_sysfs_attribute.attr,
 	&sec_antinfo_sysfs_attribute.attr,
+	&sec_memdumpinfo_sysfs_attribute.attr,
 	NULL
 };
 
@@ -983,12 +995,16 @@ int cnss_debugfs_create(struct cnss_plat_data *plat_priv)
 	cnss_create_debug_only_node(plat_priv);
 	sec_create_wifi_sysfs(plat_priv);
 
+	ret = cnss_devcoredump_init();
+	if (ret)
+		cnss_pr_err("failed to init dev coredump %d\n", ret);
 out:
 	return ret;
 }
 
 void cnss_debugfs_destroy(struct cnss_plat_data *plat_priv)
 {
+	cnss_devcoredump_exit();
 	sec_remove_wifi_sysfs(plat_priv);
 	debugfs_remove_recursive(plat_priv->root_dentry);
 }

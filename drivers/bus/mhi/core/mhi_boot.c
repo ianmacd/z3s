@@ -428,17 +428,22 @@ invalid_pm_state:
 }
 
 void mhi_free_bhie_table(struct mhi_controller *mhi_cntrl,
-			 struct image_info *image_info)
+			 struct image_info **image_info)
 {
 	int i;
-	struct mhi_buf *mhi_buf = image_info->mhi_buf;
+	struct mhi_buf *mhi_buf = (*image_info)->mhi_buf;
 
-	for (i = 0; i < image_info->entries; i++, mhi_buf++)
+	if (mhi_cntrl->img_pre_alloc)
+		return;
+
+	for (i = 0; i < (*image_info)->entries; i++, mhi_buf++)
 		mhi_free_contig_coherent(mhi_cntrl, mhi_buf->len, mhi_buf->buf,
 				  mhi_buf->dma_addr);
 
-	kfree(image_info->mhi_buf);
-	kfree(image_info);
+	kfree((*image_info)->mhi_buf);
+	kfree(*image_info);
+
+	*image_info = NULL;
 }
 
 int mhi_alloc_bhie_table(struct mhi_controller *mhi_cntrl,
@@ -452,8 +457,8 @@ int mhi_alloc_bhie_table(struct mhi_controller *mhi_cntrl,
 	struct image_info *img_info;
 	struct mhi_buf *mhi_buf;
 
-	MHI_LOG("Allocating bytes:%zu seg_size:%zu total_seg:%u\n",
-		alloc_size, seg_size, segments);
+	if (mhi_cntrl->img_pre_alloc)
+		return 0;
 
 	img_info = kzalloc(sizeof(*img_info), GFP_KERNEL);
 	if (!img_info)
@@ -602,6 +607,7 @@ void mhi_fw_load_handler(struct mhi_controller *mhi_cntrl)
 	 * device transitioning into MHI READY state
 	 */
 	if (mhi_cntrl->fbc_download) {
+		dma_set_mask(mhi_cntrl->dev, DMA_BIT_MASK(32));
 		ret = mhi_alloc_bhie_table(mhi_cntrl, &mhi_cntrl->fbc_image,
 					   firmware->size);
 		if (ret) {
@@ -613,6 +619,7 @@ void mhi_fw_load_handler(struct mhi_controller *mhi_cntrl)
 
 		/* load the firmware into BHIE vec table */
 		mhi_firmware_copy(mhi_cntrl, firmware, mhi_cntrl->fbc_image);
+		dma_set_mask(mhi_cntrl->dev, DMA_BIT_MASK(36));
 	}
 
 fw_load_ee_pthru:
@@ -656,8 +663,7 @@ fw_load_ee_pthru:
 	return;
 
 error_read:
-	mhi_free_bhie_table(mhi_cntrl, mhi_cntrl->fbc_image);
-	mhi_cntrl->fbc_image = NULL;
+	mhi_free_bhie_table(mhi_cntrl, &mhi_cntrl->fbc_image);
 
 error_alloc_fw_table:
 	release_firmware(firmware);

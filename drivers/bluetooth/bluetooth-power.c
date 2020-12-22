@@ -777,6 +777,7 @@ static enum hrtimer_restart enter_lpm(struct hrtimer *timer)
 	    exynos_update_ip_idle_status(idle_ip_index, STATUS_IDLE);
 	wake_lock_timeout(&bt_lpm_q.bt_wake_lock, HZ/2);
 
+	BT_PWR_ERR("LPM Timer Expred\n");
 	return HRTIMER_NORESTART;
 }
 
@@ -788,15 +789,19 @@ void qcomm_bt_lpm_exit_lpm_locked(struct uart_port *uport)
 	exynos_update_ip_idle_status(idle_ip_index, STATUS_BUSY);
 	set_wake_locked(1);
 
+	BT_PWR_ERR("host has data to send\n");
 	hrtimer_start(&bt_lpm_q.enter_lpm_timer, bt_lpm_q.enter_lpm_delay,
 		HRTIMER_MODE_REL);
 }
 
 static void update_host_wake_locked(int host_wake)
 {
-	if (host_wake == bt_lpm_q.host_wake)
+	if (host_wake == bt_lpm_q.host_wake) {
+		BT_PWR_ERR("No Change in Host LPM State\n");
 		return;
+	}
 
+	BT_PWR_ERR("soc has data to send - %d\n", host_wake);
 	bt_lpm_q.host_wake = host_wake;
 
 	if (host_wake) {
@@ -840,6 +845,7 @@ static irqreturn_t host_wake_isr(int irq, void *dev)
 static int qcomm_bt_lpm_init(struct platform_device *pdev)
 {
 	int ret;
+	BT_PWR_ERR("BT LPM Initialization\n");
 
 	hrtimer_init(&bt_lpm_q.enter_lpm_timer, CLOCK_MONOTONIC,
 			HRTIMER_MODE_REL);

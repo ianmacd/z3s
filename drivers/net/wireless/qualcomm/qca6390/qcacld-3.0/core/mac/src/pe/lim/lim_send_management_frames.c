@@ -55,6 +55,7 @@
 #include <cdp_txrx_peer_ops.h>
 #include "lim_process_fils.h"
 #include "wlan_utility.h"
+#include <wlan_mlme_api.h>
 
 /**
  *
@@ -407,9 +408,9 @@ lim_send_probe_req_mgmt_frame(struct mac_context *mac_ctx,
 			     additional_ie, addn_ielen);
 		payload += addn_ielen;
 	}
-	pe_nofl_debug("Probe req TX: vdev %d seq num %d to " QDF_MAC_ADDR_STR " len %d",
+	pe_nofl_debug("Probe req TX: vdev %d seq num %d to " QDF_MAC_ADDR_FMT " len %d",
 		      vdev_id, mac_ctx->mgmtSeqNum,
-		      QDF_MAC_ADDR_ARRAY(bssid),
+		      QDF_MAC_ADDR_REF(bssid),
 		      (int)sizeof(tSirMacMgmtHdr) + payload);
 
 	/* If this probe request is sent during P2P Search State, then we need
@@ -1524,8 +1525,9 @@ lim_send_assoc_rsp_mgmt_frame(
 			status);
 	}
 
-	pe_nofl_debug("Assoc rsp TX: vdev %d subtype %d to %pM seq num %d status %d aid %d",
-		      pe_session->vdev_id, subtype, mac_hdr->da,
+	pe_nofl_debug("Assoc rsp TX: vdev %d subtype %d to "QDF_MAC_ADDR_FMT" seq num %d status %d aid %d",
+		      pe_session->vdev_id, subtype,
+		      QDF_MAC_ADDR_REF(mac_hdr->da),
 		      mac_ctx->mgmtSeqNum, status_code, aid);
 
 	if (addn_ie_len && addn_ie_len <= WNI_CFG_ASSOC_RSP_ADDNIE_DATA_LEN)
@@ -2426,8 +2428,9 @@ lim_send_assoc_req_mgmt_frame(struct mac_context *mac_ctx,
 	MTRACE(qdf_trace(QDF_MODULE_ID_PE, TRACE_CODE_TX_MGMT,
 			 pe_session->peSessionId, mac_hdr->fc.subType));
 
-	pe_nofl_info("Assoc req TX: vdev %d to %pM seq num %d", pe_session->vdev_id,
-		     pe_session->bssId, mac_ctx->mgmtSeqNum);
+	pe_nofl_info("Assoc req TX: vdev %d to "QDF_MAC_ADDR_FMT" seq num %d", pe_session->vdev_id,
+		     QDF_MAC_ADDR_REF(pe_session->bssId),
+		     mac_ctx->mgmtSeqNum);
 	QDF_TRACE_HEX_DUMP(QDF_MODULE_ID_PE, QDF_TRACE_LEVEL_DEBUG,
 			  frame, (uint16_t)(sizeof(tSirMacMgmtHdr) + payload));
 
@@ -2635,7 +2638,7 @@ lim_send_auth_mgmt_frame(struct mac_context *mac_ctx,
 	uint32_t frame_len = 0, body_len = 0;
 	tpSirMacMgmtHdr mac_hdr;
 	void *packet;
-	QDF_STATUS qdf_status;
+	QDF_STATUS qdf_status, status;
 	uint8_t tx_flag = 0;
 	uint8_t vdev_id = 0;
 	uint16_t ft_ies_length = 0;
@@ -2678,8 +2681,11 @@ lim_send_auth_mgmt_frame(struct mac_context *mac_ctx,
 		body_len = SIR_MAC_AUTH_FRAME_INFO_LEN;
 		frame_len = sizeof(tSirMacMgmtHdr) + body_len;
 
-		frame_len += lim_create_fils_auth_data(mac_ctx,
-						auth_frame, session);
+		status = lim_create_fils_auth_data(mac_ctx, auth_frame,
+						   session, &frame_len);
+		if (QDF_IS_STATUS_ERROR(status))
+			return;
+
 		if (auth_frame->authAlgoNumber == eSIR_FT_AUTH) {
 			if (session->ftPEContext.pFTPreAuthReq &&
 			    0 != session->ftPEContext.pFTPreAuthReq->
@@ -2882,10 +2888,10 @@ alloc_packet:
 		}
 	}
 
-	pe_nofl_info("Auth TX: seq %d seq num %d status %d WEP %d to " QDF_MAC_ADDR_STR,
+	pe_nofl_info("Auth TX: seq %d seq num %d status %d WEP %d to " QDF_MAC_ADDR_FMT,
 		     auth_frame->authTransactionSeqNumber, mac_ctx->mgmtSeqNum,
 		     auth_frame->authStatusCode, mac_hdr->fc.wep,
-		     QDF_MAC_ADDR_ARRAY(mac_hdr->da));
+		     QDF_MAC_ADDR_REF(mac_hdr->da));
 	QDF_TRACE_HEX_DUMP(QDF_MODULE_ID_PE, QDF_TRACE_LEVEL_DEBUG,
 			   frame, frame_len);
 
@@ -3171,6 +3177,10 @@ static QDF_STATUS lim_deauth_tx_complete_cnf_handler(void *context,
 	struct mac_context *mac_ctx = (struct mac_context *)context;
 	QDF_STATUS status_code;
 	struct scheduler_msg msg = {0};
+	tLimMlmDeauthReq *deauth_req;
+	struct pe_session *session = NULL;
+
+	deauth_req = mac_ctx->lim.limDisassocDeauthCnfReq.pMlmDeauthReq;
 
 	pe_debug("tx_complete = %s tx_success = %d",
 		(tx_success == WMI_MGMT_TX_COMP_TYPE_COMPLETE_OK) ?
@@ -3178,6 +3188,22 @@ static QDF_STATUS lim_deauth_tx_complete_cnf_handler(void *context,
 
 	if (buf)
 		qdf_nbuf_free(buf);
+	if (deauth_req)
+		session = pe_find_session_by_session_id(mac_ctx,
+				deauth_req->sessionId);
+	if (tx_success != WMI_MGMT_TX_COMP_TYPE_COMPLETE_OK && session &&
+	    session->deauth_retry.retry_cnt) {
+		if (tx_timer_running(
+			&mac_ctx->lim.lim_timers.gLimDeauthAckTimer))
+			lim_deactivate_and_change_timer(mac_ctx,
+							eLIM_DEAUTH_ACK_TIMER);
+		lim_send_deauth_mgmt_frame(mac_ctx,
+				session->deauth_retry.reason_code,
+				session->deauth_retry.peer_macaddr.bytes,
+				session, true);
+	    session->deauth_retry.retry_cnt--;
+	    return QDF_STATUS_SUCCESS;
+	}
 	msg.type = (uint16_t) WMA_DEAUTH_TX_COMP;
 	msg.bodyptr = params;
 	msg.bodyval = tx_success;
@@ -3327,10 +3353,10 @@ lim_send_disassoc_mgmt_frame(struct mac_context *mac,
 				&nPayload, discon_ie);
 	mlme_free_self_disconnect_ies(pe_session->vdev);
 
-	pe_nofl_info("Disassoc TX: vdev %d seq %d reason %u and waitForAck %d to " QDF_MAC_ADDR_STR " From " QDF_MAC_ADDR_STR,
+	pe_nofl_info("Disassoc TX: vdev %d seq %d reason %u and waitForAck %d to " QDF_MAC_ADDR_FMT " From " QDF_MAC_ADDR_FMT,
 		     pe_session->vdev_id, mac->mgmtSeqNum, nReason, waitForAck,
-		     QDF_MAC_ADDR_ARRAY(pMacHdr->da),
-		     QDF_MAC_ADDR_ARRAY(pe_session->self_mac_addr));
+		     QDF_MAC_ADDR_REF(pMacHdr->da),
+		     QDF_MAC_ADDR_REF(pe_session->self_mac_addr));
 
 	if (!wlan_reg_is_24ghz_ch_freq(pe_session->curr_op_freq) ||
 	    pe_session->opmode == QDF_P2P_CLIENT_MODE ||
@@ -3515,10 +3541,10 @@ lim_send_deauth_mgmt_frame(struct mac_context *mac,
 				&nPayload, discon_ie);
 	mlme_free_self_disconnect_ies(pe_session->vdev);
 
-	pe_nofl_info("Deauth TX: vdev %d seq_num %d reason %u waitForAck %d to " QDF_MAC_ADDR_STR " from " QDF_MAC_ADDR_STR,
+	pe_nofl_info("Deauth TX: vdev %d seq_num %d reason %u waitForAck %d to " QDF_MAC_ADDR_FMT " from " QDF_MAC_ADDR_FMT,
 		     pe_session->vdev_id, mac->mgmtSeqNum, nReason, waitForAck,
-		     QDF_MAC_ADDR_ARRAY(pMacHdr->da),
-		     QDF_MAC_ADDR_ARRAY(pe_session->self_mac_addr));
+		     QDF_MAC_ADDR_REF(pMacHdr->da),
+		     QDF_MAC_ADDR_REF(pe_session->self_mac_addr));
 
 	if (!wlan_reg_is_24ghz_ch_freq(pe_session->curr_op_freq) ||
 	    pe_session->opmode == QDF_P2P_CLIENT_MODE ||
@@ -3539,6 +3565,15 @@ lim_send_deauth_mgmt_frame(struct mac_context *mac,
 		lim_diag_mgmt_tx_event_report(mac, pMacHdr,
 					      pe_session,
 					      QDF_STATUS_SUCCESS, QDF_STATUS_SUCCESS);
+		if (pe_session->opmode == QDF_STA_MODE &&
+		    mac->mlme_cfg->sta.deauth_retry_cnt &&
+		    !pe_session->deauth_retry.retry_cnt) {
+			pe_session->deauth_retry.retry_cnt =
+				mac->mlme_cfg->sta.deauth_retry_cnt;
+			pe_session->deauth_retry.reason_code = nReason;
+			qdf_mem_copy(pe_session->deauth_retry.peer_macaddr.bytes,
+					 peer, QDF_MAC_ADDR_SIZE);
+		}
 		/* Queue Disassociation frame in high priority WQ */
 		qdf_status =
 			wma_tx_frameWithTxComplete(mac, pPacket, (uint16_t) nBytes,
@@ -4098,8 +4133,8 @@ lim_send_extended_chan_switch_action_frame(struct mac_context *mac_ctx,
 	    session_entry->opmode == QDF_P2P_GO_MODE)
 		txFlag |= HAL_USE_BD_RATE2_FOR_MANAGEMENT_FRAME;
 
-	pe_debug("ECSA frame to :"QDF_MAC_ADDR_STR" count %d mode %d chan %d op class %d",
-		 QDF_MAC_ADDR_ARRAY(mac_hdr->da),
+	pe_debug("ECSA frame to :"QDF_MAC_ADDR_FMT" count %d mode %d chan %d op class %d",
+		 QDF_MAC_ADDR_REF(mac_hdr->da),
 		 frm.ext_chan_switch_ann_action.switch_count,
 		 frm.ext_chan_switch_ann_action.switch_mode,
 		 frm.ext_chan_switch_ann_action.new_channel,
@@ -4251,8 +4286,8 @@ lim_p2p_oper_chan_change_confirm_action_frame(struct mac_context *mac_ctx,
 		tx_flag |= HAL_USE_BD_RATE2_FOR_MANAGEMENT_FRAME;
 	}
 	pe_debug("Send frame on channel freq %d to mac "
-		QDF_MAC_ADDR_STR, session_entry->curr_op_freq,
-		QDF_MAC_ADDR_ARRAY(peer));
+		QDF_MAC_ADDR_FMT, session_entry->curr_op_freq,
+		QDF_MAC_ADDR_REF(peer));
 
 	MTRACE(qdf_trace(QDF_MODULE_ID_PE, TRACE_CODE_TX_MGMT,
 			session_entry->peSessionId, mac_hdr->fc.subType));
@@ -4505,7 +4540,8 @@ lim_send_link_report_action_frame(struct mac_context *mac,
 			nStatus);
 	}
 
-	pe_warn("RRM: Sending Link Report to %pM on vdev[%d]", peer, vdev_id);
+	pe_warn("RRM: Sending Link Report to "QDF_MAC_ADDR_FMT" on vdev[%d]",
+		QDF_MAC_ADDR_REF(peer), vdev_id);
 
 	if (!wlan_reg_is_24ghz_ch_freq(pe_session->curr_op_freq) ||
 	    pe_session->opmode == QDF_P2P_CLIENT_MODE ||
@@ -4537,102 +4573,6 @@ returnAfterError:
 	return status_code;
 } /* End lim_send_link_report_action_frame. */
 
-#ifdef WLAN_FEATURE_BCN_RPT_VSIE
-/**
- * lim_fill_beacon_report_error_vsie: To fill beacon report error vsie
- * @param pe_session: session
- * @param ie_buf: double pointer that holds address of error vsie
- * @param error_code: beacon_report_status_code
- *
- * @return QDF_STATUS: success/failure
- */
-static QDF_STATUS
-lim_fill_beacon_report_error_vsie(struct pe_session *pe_session,
-				  uint8_t **ie_buf, uint8_t *ie_len,
-				  enum beacon_report_status_code
-				  error_code)
-{
-	uint8_t *buf = NULL, *vsie_ie = NULL;
-
-	/*
-	 * Vendor specific IE to be advertised in beacon report response
-	 * req:
-	 * Type     0xDD
-	 * Length   0x0A
-	 * OUI      0x00 0x00 0xF0
-	 * Type     0x22
-	 * subtype  0x05
-	 * Version  0x01
-	 * Length   0x01
-	 * Data     0x00-0x07 (beacon report error)
-	 * supported)
-	 */
-	vsie_ie = qdf_mem_malloc(BEACON_RPT_ERR_VSIE_STA_IE_LEN + 2);
-	if (!vsie_ie)
-		return QDF_STATUS_E_FAILURE;
-
-	/* Fill the Vendor IE Type (0xDD) */
-	buf = vsie_ie;
-	*buf = WLAN_ELEMID_VENDOR;
-	buf++;
-
-	/* Fill the Vendor IE length (0x0A) */
-	*buf = BEACON_RPT_ERR_VSIE_STA_IE_LEN;
-	buf++;
-
-	/*
-	 * Fill the vsie Vendor specific OUI(0x00 0x00 0xF0 0x22)
-	 */
-	qdf_mem_copy(buf, BEACON_RPT_ERR_VSIE_STA_OUI,
-		     BEACON_RPT_ERR_VSIE_OUI_LEN);
-	buf += BEACON_RPT_ERR_VSIE_OUI_LEN;
-
-	/*
-	 * Fill Subtype version and length (0x05 0x01 0x01)
-	 */
-	qdf_mem_copy(buf, BEACON_RPT_ERR_VSIE_OUI_DATA,
-		     BEACON_RPT_ERR_VSIE_DATA_LEN);
-	buf += BEACON_RPT_ERR_VSIE_DATA_LEN;
-
-	/* Fill error code */
-	*buf = error_code;
-
-	*ie_len = BEACON_RPT_ERR_VSIE_STA_IE_LEN + 2;
-	*ie_buf = vsie_ie;
-	return QDF_STATUS_SUCCESS;
-}
-#else
-static QDF_STATUS
-lim_fill_beacon_report_error_vsie(struct pe_session *pe_session,
-				  uint8_t **ie_buf, uint8_t *ie_len,
-				  enum beacon_report_status_code
-				  error_code)
-{
-	return QDF_STATUS_SUCCESS;
-}
-#endif
-
-#ifdef WLAN_FEATURE_BCN_RPT_VSIE
-static bool
-lim_check_bcn_rpt_err_vsie_status(struct mac_context *mac,
-				  enum beacon_report_status_code error_code)
-{
-	if (mac->mlme_cfg->sta.bcn_rpt_err_vsie && error_code !=
-	    BCN_RPT_SUCCESS) {
-		return true;
-	}
-
-	return false;
-}
-#else
-static bool
-lim_check_bcn_rpt_err_vsie_status(struct mac_context *mac,
-				  enum beacon_report_status_code error_code)
-{
-	return false;
-}
-#endif
-
 QDF_STATUS
 lim_send_radio_measure_report_action_frame(struct mac_context *mac,
 				uint8_t dialog_token,
@@ -4640,23 +4580,18 @@ lim_send_radio_measure_report_action_frame(struct mac_context *mac,
 				bool is_last_frame,
 				tpSirMacRadioMeasureReport pRRMReport,
 				tSirMacAddr peer,
-				struct pe_session *pe_session,
-				enum beacon_report_status_code error_code)
+				struct pe_session *pe_session)
 {
 	QDF_STATUS status_code = QDF_STATUS_SUCCESS;
 	uint8_t *pFrame;
 	tpSirMacMgmtHdr pMacHdr;
-	uint32_t nPayload, nStatus;
-	uint32_t nBytes = 0;
+	uint32_t nBytes, nPayload, nStatus;
 	void *pPacket;
 	QDF_STATUS qdf_status;
 	uint8_t i;
 	uint8_t txFlag = 0;
 	uint8_t smeSessionId = 0;
 	bool is_last_report = false;
-	uint8_t *bcn_rpt_err_vsie = NULL;
-	uint8_t vs_ie_len = 0;
-	bool bcn_rpt_err_vsie_enable = false;
 
 	tDot11fRadioMeasurementReport *frm =
 		qdf_mem_malloc(sizeof(tDot11fRadioMeasurementReport));
@@ -4668,9 +4603,6 @@ lim_send_radio_measure_report_action_frame(struct mac_context *mac,
 		qdf_mem_free(frm);
 		return QDF_STATUS_E_FAILURE;
 	}
-
-	bcn_rpt_err_vsie_enable = lim_check_bcn_rpt_err_vsie_status(mac,
-								    error_code);
 
 	smeSessionId = pe_session->smeSessionId;
 
@@ -4703,15 +4635,6 @@ lim_send_radio_measure_report_action_frame(struct mac_context *mac,
 						     &pRRMReport[i].report.
 						     beaconReport,
 						     is_last_report);
-
-			if (bcn_rpt_err_vsie_enable) {
-				lim_fill_beacon_report_error_vsie
-						 (pe_session,
-						  &bcn_rpt_err_vsie,
-						  &vs_ie_len, error_code);
-				nBytes = vs_ie_len;
-			}
-
 			frm->MeasurementReport[i].incapable =
 				pRRMReport[i].incapable;
 			frm->MeasurementReport[i].refused =
@@ -4737,15 +4660,13 @@ lim_send_radio_measure_report_action_frame(struct mac_context *mac,
 		/* We'll fall back on the worst case scenario: */
 		nPayload = sizeof(tDot11fLinkMeasurementReport);
 		qdf_mem_free(frm);
-		qdf_mem_free(bcn_rpt_err_vsie);
 		return QDF_STATUS_E_FAILURE;
 	} else if (DOT11F_WARNED(nStatus)) {
 		pe_warn("Warnings while calculating the size for Radio Measure Report (0x%08x)",
 			nStatus);
 	}
 
-	nBytes += nPayload + sizeof(tSirMacMgmtHdr);
-
+	nBytes = nPayload + sizeof(tSirMacMgmtHdr);
 
 	qdf_status =
 		cds_packet_alloc((uint16_t) nBytes, (void **)&pFrame,
@@ -4754,7 +4675,6 @@ lim_send_radio_measure_report_action_frame(struct mac_context *mac,
 		pe_nofl_err("TX: [802.11 RRM] Allocation of %d bytes failed for RM"
 			   "Report", nBytes);
 		qdf_mem_free(frm);
-		qdf_mem_free(bcn_rpt_err_vsie);
 		return QDF_STATUS_E_FAILURE;
 	}
 	/* Paranoia: */
@@ -4790,18 +4710,14 @@ lim_send_radio_measure_report_action_frame(struct mac_context *mac,
 			nStatus);
 	}
 
-	if (bcn_rpt_err_vsie_enable) {
-		qdf_mem_copy(pFrame + sizeof(tSirMacMgmtHdr) + nPayload,
-			     bcn_rpt_err_vsie, vs_ie_len);
-	}
-
-	pe_nofl_info("TX: %s seq_no:%d dialog_token:%d no. of APs:%d is_last_rpt:%d num_report: %d peer:%pM",
+	pe_nofl_info("TX: %s seq_no:%d dialog_token:%d no. of APs:%d is_last_rpt:%d num_report: %d peer:"QDF_MAC_ADDR_FMT,
 		     frm->MeasurementReport[0].type == SIR_MAC_RRM_BEACON_TYPE ?
 		     "[802.11 BCN_RPT]" : "[802.11 RRM]",
 		     (pMacHdr->seqControl.seqNumHi << HIGH_SEQ_NUM_OFFSET |
 		     pMacHdr->seqControl.seqNumLo),
 		     dialog_token, frm->num_MeasurementReport,
-		     is_last_report, num_report, peer);
+		     is_last_report, num_report,
+		     QDF_MAC_ADDR_REF(peer));
 
 	if (!wlan_reg_is_24ghz_ch_freq(pe_session->curr_op_freq) ||
 	    pe_session->opmode == QDF_P2P_CLIENT_MODE ||
@@ -4824,12 +4740,10 @@ lim_send_radio_measure_report_action_frame(struct mac_context *mac,
 	}
 
 	qdf_mem_free(frm);
-	qdf_mem_free(bcn_rpt_err_vsie);
 	return status_code;
 
 returnAfterError:
 	qdf_mem_free(frm);
-	qdf_mem_free(bcn_rpt_err_vsie);
 	cds_packet_free((void *)pPacket);
 	return status_code;
 }
@@ -5198,8 +5112,9 @@ QDF_STATUS lim_send_addba_response_frame(struct mac_context *mac_ctx,
 		}
 	}
 
-	pe_debug("Sending a ADDBA Response from %pM to %pM",
-		session->self_mac_addr, peer_mac);
+	pe_debug("Sending a ADDBA Response from "QDF_MAC_ADDR_FMT" to "QDF_MAC_ADDR_FMT,
+		 QDF_MAC_ADDR_REF(session->self_mac_addr),
+		 QDF_MAC_ADDR_REF(peer_mac));
 	pe_debug("tid %d dialog_token %d status %d buff_size %d amsdu_supp %d",
 		 tid, frm.DialogToken.token, frm.Status.status,
 		 frm.addba_param_set.buff_size,
@@ -5336,8 +5251,9 @@ static QDF_STATUS lim_delba_tx_complete_cnf(void *context,
 		       status, frame_len);
 		goto error;
 	}
-	pe_debug("delba ota done vdev %d %pM tid %d desc_id %d status %d",
-		 mgmt_params->vdev_id, mac_hdr->da, frm.delba_param_set.tid,
+	pe_debug("delba ota done vdev %d "QDF_MAC_ADDR_FMT" tid %d desc_id %d status %d",
+		 mgmt_params->vdev_id,
+		 QDF_MAC_ADDR_REF(mac_hdr->da), frm.delba_param_set.tid,
 		 mgmt_params->desc_id, tx_complete);
 	cdp_delba_tx_completion(soc, mac_hdr->da, mgmt_params->vdev_id,
 				frm.delba_param_set.tid, tx_complete);
@@ -5368,8 +5284,8 @@ QDF_STATUS lim_send_delba_action_frame(struct mac_context *mac_ctx,
 		pe_debug("delba invalid vdev id %d ", vdev_id);
 		return QDF_STATUS_E_INVAL;
 	}
-	pe_debug("send delba vdev %d %pM tid %d reason %d", vdev_id,
-		 peer_macaddr, tid, reason_code);
+	pe_debug("send delba vdev %d "QDF_MAC_ADDR_FMT" tid %d reason %d", vdev_id,
+		 QDF_MAC_ADDR_REF(peer_macaddr), tid, reason_code);
 	qdf_mem_zero((uint8_t *)&frm, sizeof(frm));
 	frm.Category.category = ACTION_CATEGORY_BACK;
 	frm.Action.action = DELBA;
@@ -5452,7 +5368,6 @@ error_delba:
 }
 
 #define WLAN_SAE_AUTH_TIMEOUT 1000
-#define WLAN_SAE_AUTH_RETRY 1
 
 /**
  * lim_tx_mgmt_frame() - Transmits Auth mgmt frame
@@ -5512,11 +5427,24 @@ lim_handle_sae_auth_retry(struct mac_context *mac_ctx, uint8_t vdev_id,
 {
 	struct pe_session *session;
 	struct sae_auth_retry *sae_retry;
+	uint8_t retry_count = 0;
 
 	session = pe_find_session_by_vdev_id(mac_ctx, vdev_id);
 	if (!session) {
 		pe_err("session not found for given vdev_id %d",
 		       vdev_id);
+		return;
+	}
+	if (session->opmode != QDF_STA_MODE)
+		return;
+
+	if (session->limMlmState == eLIM_MLM_WT_SAE_AUTH_STATE)
+		wlan_mlme_get_sae_auth_retry_count(mac_ctx->psoc, &retry_count);
+	else
+		wlan_mlme_get_sae_roam_auth_retry_count(mac_ctx->psoc,
+							&retry_count);
+	if (!retry_count) {
+		pe_debug("vdev %d: SAE Auth retry disabled", vdev_id);
 		return;
 	}
 
@@ -5542,7 +5470,7 @@ lim_handle_sae_auth_retry(struct mac_context *mac_ctx, uint8_t vdev_id,
 	mac_ctx->lim.lim_timers.g_lim_periodic_auth_retry_timer.sessionId =
 					session->peSessionId;
 	sae_retry->sae_auth.len = frame_len;
-	sae_retry->sae_auth_max_retry = WLAN_SAE_AUTH_RETRY;
+	sae_retry->sae_auth_max_retry = retry_count;
 
 	tx_timer_change(
 		&mac_ctx->lim.lim_timers.g_lim_periodic_auth_retry_timer,

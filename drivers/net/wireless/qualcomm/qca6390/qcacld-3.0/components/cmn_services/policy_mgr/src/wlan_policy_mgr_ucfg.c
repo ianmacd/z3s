@@ -19,9 +19,12 @@
 #include "wlan_policy_mgr_i.h"
 #include "cfg_ucfg_api.h"
 #include "wlan_policy_mgr_api.h"
-#ifndef SEC_CONFIG_PSM_SYSFS
+
+#if defined(CONFIG_WLAN_SAMSUNG_FEATURE) && !defined(SEC_CONFIG_PSM_SYSFS)
 extern int wlan_hdd_sec_get_psm(void);
 #endif /* !SEC_CONFIG_PSM_SYSFS */
+
+
 
 static QDF_STATUS policy_mgr_init_cfg(struct wlan_objmgr_psoc *psoc)
 {
@@ -72,7 +75,7 @@ static QDF_STATUS policy_mgr_init_cfg(struct wlan_objmgr_psoc *psoc)
 	cfg->go_force_scc = cfg_get(psoc, CFG_P2P_GO_ENABLE_FORCE_SCC);
 	cfg->prefer_5g_scc_to_dbs = cfg_get(psoc, CFG_PREFER_5G_SCC_TO_DBS);
 
-#ifndef SEC_CONFIG_PSM_SYSFS
+#if defined(CONFIG_WLAN_SAMSUNG_FEATURE) && !defined(SEC_CONFIG_PSM_SYSFS)
        if (wlan_hdd_sec_get_psm()) {
                cfg->dual_mac_feature = 1;
                printk("[WIFI] CFG_DUAL_MAC_FEATURE_DISABLE : sec_control_psm = %u", cfg->dual_mac_feature);

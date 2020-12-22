@@ -84,8 +84,17 @@
 #define OIS_DUAL_CAL_DEFAULT_VALUE_WIDE 0
 #define OIS_DUAL_CAL_DEFAULT_VALUE_TELE 0
 
-// #define USE_FAKE_RETENTION
+#define USE_MCU_SPI_PUD_SETTING
 
+// #define USE_FAKE_RETENTION
+#define USE_CAMFW_POLICY_ED38
 #define CAMERA_FRONT_FIXED_FOCUS
 
+/*
+ * Issue : When 2ld camera open, I2C SCL signal rarely keep LOW especially on certain devices due to long falling time of VDDIO.
+ * Solution : Add additional delay between rom_power_off and prepare_retention to make sure VDDIO is LOW during the boot.
+ */
+#define CAMERA_USE_COMMON_VDDIO
+
+#define TELE_OIS_TILT_ROM_ID 4
 #endif /* IS_VENDOR_CONFIG_CNT_V01_H */

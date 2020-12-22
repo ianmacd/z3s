@@ -1180,7 +1180,7 @@ struct decon_win_update {
 	u32 verti_cnt;
 	/* previous update region */
 	struct decon_rect prev_up_region;
-	struct decon_rect back_up_region;
+	bool force_full;
 };
 
 struct decon_bts_ops {
@@ -1389,6 +1389,10 @@ struct decon_device {
 	bool mres_enabled;
 	bool low_persistence;
 
+#if IS_ENABLED(CONFIG_EXYNOS_FPS_CHANGE_NOTIFY)
+	/* display LCD fps change notifier */
+	struct atomic_notifier_head fps_change_notifier_list;
+#endif
 	int color_mode;
 
 #if defined(CONFIG_EXYNOS_COMMON_PANEL)
@@ -1431,10 +1435,6 @@ struct decon_device {
 	int leak_cnt;
 #endif
 
-#if IS_ENABLED(CONFIG_EXYNOS_FPS_CHANGE_NOTIFY)
-	/* display LCD fps change notifier */
-	struct atomic_notifier_head fps_change_notifier_list;
-#endif
 };
 #ifdef CONFIG_EXYNOS_MCD_HDR
 
@@ -2154,6 +2154,7 @@ int _decon_enable(struct decon_device *decon, enum decon_state state);
 #ifdef CONFIG_EXYNOS_SET_ACTIVE
 /* Display Mode Support */
 #define EXYNOS_GET_DISPLAY_MODE_NUM	_IOW('F', 700, u32)
+#define EXYNOS_GET_DISPLAY_MODE_OLD		_IOW('F', 701, struct exynos_display_mode_old)
 #define EXYNOS_GET_DISPLAY_MODE		_IOW('F', 701, struct exynos_display_mode)
 #define EXYNOS_GET_DISPLAY_CURRENT_MODE _IOW('F', 705, u32)
 #endif

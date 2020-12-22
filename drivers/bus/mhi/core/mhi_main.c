@@ -240,6 +240,7 @@ enum mhi_ee mhi_get_exec_env(struct mhi_controller *mhi_cntrl)
 	 */
 	return (ret) ? MHI_EE_MAX : exec;
 }
+EXPORT_SYMBOL(mhi_get_exec_env);
 
 enum mhi_dev_state mhi_get_mhi_state(struct mhi_controller *mhi_cntrl)
 {
@@ -1582,9 +1583,10 @@ void mhi_ev_task(unsigned long data)
 	spin_unlock_bh(&mhi_event->lock);
 }
 
-void mhi_ctrl_ev_process(struct mhi_controller *mhi_cntrl,
-	struct mhi_event *mhi_event)
+void mhi_ctrl_ev_task(unsigned long data)
 {
+	struct mhi_event *mhi_event = (struct mhi_event *)data;
+	struct mhi_controller *mhi_cntrl = mhi_event->mhi_cntrl;
 	enum mhi_dev_state state;
 	enum MHI_PM_STATE pm_state = 0;
 	int ret;
@@ -1625,14 +1627,6 @@ void mhi_ctrl_ev_process(struct mhi_controller *mhi_cntrl,
 		if (pm_state == MHI_PM_SYS_ERR_DETECT)
 			mhi_process_sys_err(mhi_cntrl);
 	}
-}
-
-void mhi_ctrl_ev_task(unsigned long data)
-{
-	struct mhi_event *mhi_event = (struct mhi_event *)data;
-	struct mhi_controller *mhi_cntrl = mhi_event->mhi_cntrl;
-
-	mhi_ctrl_ev_process(mhi_cntrl, mhi_event);
 }
 
 irqreturn_t mhi_msi_handlr(int irq_number, void *dev)
@@ -2707,7 +2701,7 @@ void mhi_debug_reg_dump(struct mhi_controller *mhi_cntrl)
 	struct {
 		const char *name;
 		int offset;
-		void *base;
+		void __iomem *base;
 	} debug_reg[] = {
 		{ "MHI_CNTRL", MHICTRL, mhi_base},
 		{ "MHI_STATUS", MHISTATUS, mhi_base},
@@ -2737,6 +2731,8 @@ void mhi_debug_reg_dump(struct mhi_controller *mhi_cntrl)
 		TO_MHI_STATE_STR(state));
 
 	for (i = 0; debug_reg[i].name; i++) {
+		if (!debug_reg[i].base)
+			continue;
 		ret = mhi_read_reg(mhi_cntrl, debug_reg[i].base,
 				   debug_reg[i].offset, &val);
 		MHI_LOG("reg:%s val:0x%x, ret:%d\n", debug_reg[i].name, val,

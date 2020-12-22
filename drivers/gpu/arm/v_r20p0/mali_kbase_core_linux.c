@@ -5015,6 +5015,8 @@ static int kbase_platform_device_probe(struct platform_device *pdev)
 	gpu_asv_calibration_start();
 #endif
 
+	/* MALI_SEC_INTEGRATION */
+#ifdef CONFIG_MALI_TSG
 	kbdev->queued_total_job_nr = 0;
 	kbdev->in_js_total_job_nr = 0;
 	kbdev->hw_complete_job_nr_cnt = 0;
@@ -5029,6 +5031,7 @@ static int kbase_platform_device_probe(struct platform_device *pdev)
 	kbdev->queued_time[1] = 0;
 	kbdev->queued_threshold[0] = 0;
 	kbdev->queued_threshold[1] = 0;
+#endif
 
 	return err;
 }

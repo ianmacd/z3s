@@ -576,8 +576,8 @@ int sensor_hi847_cis_log_status(struct v4l2_subdev *subdev)
 	ret = is_sensor_read16(client, SENSOR_HI847_COARSE_INTEG_TIME_ADDR, &data16);
 	if (unlikely(!ret)) pr_info("[SEN:INFO]coarse_integration_time(0x%x)\n", data16);
 	else goto p_i2c_err;
-	ret = is_sensor_read16(client, SENSOR_HI847_ANALOG_GAIN_ADDR, &data16);
-	if (unlikely(!ret)) pr_info("[SEN:INFO]gain_code_global(0x%x)\n", data16);
+	ret = is_sensor_read8(client, SENSOR_HI847_ANALOG_GAIN_ADDR, &data8);
+	if (unlikely(!ret)) pr_info("[SEN:INFO]gain_code_global(0x%x)\n", data8);
 	else goto p_i2c_err;
 	ret = is_sensor_read16(client, SENSOR_HI847_DIGITAL_GAIN_GR_ADDR, &data16);
 	if (unlikely(!ret)) pr_info("[SEN:INFO]gain_code_global(0x%x)\n", data16);

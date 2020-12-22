@@ -26,6 +26,7 @@
 #include <linux/usb_notify.h>
 #include <sound/core.h>
 #include <linux/usb/audio.h>
+#include <linux/ratelimit.h>
 #include "host_notify_class.h"
 #include "dock_notify.h"
 #include "usb_notify_sysfs.h"
@@ -935,6 +936,11 @@ void send_usb_mdm_uevent(void)
 	char *words = {"WORDS=no_whitelist"};
 	int index = 0;
 
+	if (!o_notify) {
+		pr_err("%s o_notify is null\n", __func__);
+		goto err;
+	}
+
 	envp[index++] = type;
 	envp[index++] = state;
 
@@ -960,6 +966,12 @@ void send_usb_certi_uevent(int usb_certi)
 	char *state = {"STATE=ADD"};
 	char *words;
 	int index = 0;
+	static DEFINE_RATELIMIT_STATE(rs_warm_reset, 5 * HZ, 1);
+
+	if (!o_notify) {
+		pr_err("%s o_notify is null\n", __func__);
+		goto err;
+	}
 
 	envp[index++] = type;
 	envp[index++] = state;
@@ -980,6 +992,11 @@ void send_usb_certi_uevent(int usb_certi)
 	case USB_CERTI_HOST_RESOURCE_EXCEED:
 		words = "WORDS=host_resource_exceed";
 		break;
+	case USB_CERTI_WARM_RESET:
+		if (!__ratelimit(&rs_warm_reset))
+			goto err;
+		words = "WORDS=no_response";
+		break;
 	default:
 		pr_err("%s invalid input\n", __func__);
 		goto err;
@@ -993,7 +1010,7 @@ void send_usb_certi_uevent(int usb_certi)
 		pr_err("%s error\n", __func__);
 		goto err;
 	}
-	pr_info("%s: %s\n", __func__, words);
+	pr_info("%s: %s(%d)\n", __func__, words, usb_certi);
 err:
 	return;
 }
@@ -1007,6 +1024,11 @@ void send_usb_err_uevent(int err_type, int mode)
 	char *state;
 	char *words;
 	int index = 0;
+
+	if (!o_notify) {
+		pr_err("%s o_notify is null\n", __func__);
+		goto err;
+	}
 
 	if (mode)
 		state = "STATE=ADD";
@@ -1037,6 +1059,45 @@ err:
 	return;
 }
 EXPORT_SYMBOL(send_usb_err_uevent);
+
+void send_usb_itracker_uevent(int err_type)
+{
+	struct otg_notify *o_notify = get_otg_notify();
+	char *envp[4];
+	char *type = {"TYPE=usbtracker"};
+	char *state = {"STATE=ADD"};
+	char *words;
+	int index = 0;
+
+	if (!o_notify) {
+		pr_err("%s o_notify is null\n", __func__);
+		goto err;
+	}
+
+	envp[index++] = type;
+	envp[index++] = state;
+
+	switch (err_type) {
+	case NOTIFY_USB_CC_REPEAT:
+		words = "WORDS=repeat_ccirq";
+		break;
+	default:
+		pr_err("%s invalid input\n", __func__);
+		goto err;
+	}
+
+	envp[index++] = words;
+	envp[index++] = NULL;
+
+	if (send_usb_notify_uevent(o_notify, envp)) {
+		pr_err("%s error\n", __func__);
+		goto err;
+	}
+	pr_info("%s: %s\n", __func__, words);
+err:
+	return;
+}
+EXPORT_SYMBOL(send_usb_itracker_uevent);
 
 int get_class_index(int ch9_class_num)
 {
@@ -2314,6 +2375,11 @@ void send_usb_audio_uevent(struct usb_device *dev,
 	int cardnum = 0;
 #endif
 
+	if (!o_notify) {
+		pr_err("%s o_notify is null\n", __func__);
+		goto err;
+	}
+
 	if (!is_known_usbaudio(dev))
 		goto err;
 
@@ -2336,7 +2402,7 @@ void send_usb_audio_uevent(struct usb_device *dev,
 	envp[index++] = path_buf;
 
 #ifdef CONFIG_USB_AUDIO_ENHANCED_DETECT_TIME
-	if (attach) {
+	if (attach && !card_num) {
 		cardnum = get_next_snd_card_number(THIS_MODULE);
 		if (cardnum < 0) {
 			pr_err("%s cardnum error\n", __func__);
@@ -2632,7 +2698,7 @@ int set_otg_notify(struct otg_notify *n)
 	}
 
 	if (n->is_wakelock || n->is_host_wakelock) {
-		wakeup_source_prepare(&u_notify->ws, "usb_notify");
+		u_notify->ws.name = "usb_notify";
 		wakeup_source_add(&u_notify->ws);
 	}
 
@@ -2688,10 +2754,9 @@ void put_otg_notify(struct otg_notify *n)
 	unregister_usbdev_notify();
 	if (n->booting_delay_sec)
 		cancel_delayed_work_sync(&u_notify->b_delay.booting_work);
-	if (n->is_wakelock || n->is_host_wakelock) {
+	if (n->is_wakelock || n->is_host_wakelock)
 		wakeup_source_remove(&u_notify->ws);
-		wakeup_source_drop(&u_notify->ws);
-	}
+
 	if (gpio_is_valid(n->vbus_detect_gpio))
 		free_irq(gpio_to_irq(n->vbus_detect_gpio), NULL);
 	usb_notify_dev_unregister(&u_notify->udev);

@@ -125,12 +125,6 @@ struct obss_detection_cfg {
 #define ADAPTIVE_11R_DATA_LEN      0x04
 #define ADAPTIVE_11R_OUI_DATA     "\x00\x00\x00\x01"
 
-#define BEACON_RPT_ERR_VSIE_STA_IE_LEN         0x08
-#define BEACON_RPT_ERR_VSIE_STA_OUI            "\x00\x00\xf0\x22"
-#define BEACON_RPT_ERR_VSIE_OUI_LEN            0X04
-#define BEACON_RPT_ERR_VSIE_DATA_LEN           0x03
-#define BEACON_RPT_ERR_VSIE_OUI_DATA           "\x05\x01\x01"
-
 /**
  * struct pe_session - per-vdev PE context
  * @available: true if the entry is available, false if it is in use
@@ -550,6 +544,7 @@ struct pe_session {
 	uint8_t bss_color_changing;
 #endif
 #endif
+	struct deauth_retry_params deauth_retry;
 	bool enable_bcast_probe_rsp;
 	uint8_t ht_client_cnt;
 	bool force_24ghz_in_ht20;

@@ -247,7 +247,7 @@ static void max77705_set_float_voltage(struct max77705_charger_data *charger,
 
 #if defined(CONFIG_SEC_FACTORY)
 	if (factory_mode) {
-		float_voltage = 3800;
+		float_voltage = charger->pdata->float_voltage_in_factory;
 		pr_info("%s: Factory Mode Skip set float voltage(%d)\n", __func__, float_voltage);
 		// do not return here
 	}
@@ -2317,11 +2317,19 @@ static void max77705_wc_current_work(struct work_struct *work)
 				POWER_SUPPLY_PROP_INPUT_VOLTAGE_REGULATION, value);
 		wake_unlock(&charger->wc_current_wake_lock);
 	} else {
-		diff_current = charger->wc_pre_current - charger->wc_current;
-		diff_current = (diff_current > WC_CURRENT_STEP) ? WC_CURRENT_STEP :
-			((diff_current < -WC_CURRENT_STEP) ? -WC_CURRENT_STEP : diff_current);
-
-		charger->wc_pre_current -= diff_current;
+		if (charger->wc_pre_current > charger->wc_current) {
+			diff_current = charger->wc_pre_current - charger->wc_current;
+			if (diff_current < charger->pdata->wc_current_step)
+				charger->wc_pre_current -= diff_current;
+			else
+				charger->wc_pre_current -= charger->pdata->wc_current_step;
+		} else {
+			diff_current = charger->wc_current - charger->wc_pre_current;
+			if (diff_current < charger->pdata->wc_current_step)
+				charger->wc_pre_current += diff_current;
+			else
+				charger->wc_pre_current += charger->pdata->wc_current_step;
+		}
 		max77705_set_input_current(charger, charger->wc_pre_current);
 		queue_delayed_work(charger->wqueue, &charger->wc_current_work,
 				   msecs_to_jiffies(WC_CURRENT_WORK_STEP));
@@ -2425,6 +2433,21 @@ static int max77705_charger_parse_dt(struct max77705_charger_data *charger)
 			else
 				max77705_set_snkcap(charger->snkcap_data, len);
 		}
+
+		ret = of_property_read_u32(np, "battery,float_voltage_in_factory",
+			&pdata->float_voltage_in_factory);
+		if (ret) {
+			pr_info("%s: float_voltage_in_factory is Empty\n", __func__);
+			pdata->float_voltage_in_factory = 3800;
+		}
+
+		ret = of_property_read_u32(np, "battery,wc_current_step",
+					   &pdata->wc_current_step);
+		if (ret) {
+			pr_info("%s: battery,wc_current_step is Empty\n", __func__);
+			pdata->wc_current_step = WC_CURRENT_STEP; /* default 100mA */
+		}
+		pr_info("%s: battery,wc_current_step is %d\n", __func__, pdata->wc_current_step);
 	}
 
 	np = of_find_node_by_name(NULL, "max77705-fuelgauge");

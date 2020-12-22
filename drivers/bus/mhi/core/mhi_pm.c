@@ -404,35 +404,42 @@ void mhi_pm_m1_transition(struct mhi_controller *mhi_cntrl)
 	enum MHI_PM_STATE state;
 
 	write_lock_irq(&mhi_cntrl->pm_lock);
+	/* Just check if we are racing with device_wake assertion */
+	if (atomic_read(&mhi_cntrl->dev_wake))
+		MHI_VERB("M2 transition request post dev_wake:%d\n",
+			 atomic_read(&mhi_cntrl->dev_wake));
+
 	/* if it fails, means we transition to M3 */
 	state = mhi_tryset_pm_state(mhi_cntrl, MHI_PM_M2);
-	if (state == MHI_PM_M2) {
-		MHI_VERB("Entered M2 State\n");
-		mhi_set_mhi_state(mhi_cntrl, MHI_STATE_M2);
-		mhi_cntrl->dev_state = MHI_STATE_M2;
-		mhi_cntrl->M2++;
-
+	if (state != MHI_PM_M2) {
+		/* Nothing to be done, handle M3 transition later */
 		write_unlock_irq(&mhi_cntrl->pm_lock);
-		wake_up_all(&mhi_cntrl->state_event);
-
-		/* transfer pending, exit M2 immediately */
-		if (unlikely(atomic_read(&mhi_cntrl->pending_pkts) ||
-			     atomic_read(&mhi_cntrl->dev_wake))) {
-			MHI_VERB(
-				 "Exiting M2 Immediately, pending_pkts:%d dev_wake:%d\n",
-				 atomic_read(&mhi_cntrl->pending_pkts),
-				 atomic_read(&mhi_cntrl->dev_wake));
-			read_lock_bh(&mhi_cntrl->pm_lock);
-			mhi_cntrl->wake_get(mhi_cntrl, true);
-			mhi_cntrl->wake_put(mhi_cntrl, true);
-			read_unlock_bh(&mhi_cntrl->pm_lock);
-		} else {
-			mhi_cntrl->status_cb(mhi_cntrl, mhi_cntrl->priv_data,
-					     MHI_CB_IDLE);
-		}
-	} else {
-		write_unlock_irq(&mhi_cntrl->pm_lock);
+		return;
 	}
+
+	MHI_VERB("Entered M2 State\n");
+	mhi_set_mhi_state(mhi_cntrl, MHI_STATE_M2);
+	mhi_cntrl->dev_state = MHI_STATE_M2;
+	mhi_cntrl->M2++;
+
+	write_unlock_irq(&mhi_cntrl->pm_lock);
+	wake_up_all(&mhi_cntrl->state_event);
+
+	/* transfer pending, exit M2 immediately */
+	if (unlikely(atomic_read(&mhi_cntrl->pending_pkts) ||
+		     atomic_read(&mhi_cntrl->dev_wake))) {
+		MHI_VERB(
+			 "Exiting M2 Immediately, pending_pkts:%d dev_wake:%d\n",
+			 atomic_read(&mhi_cntrl->pending_pkts),
+			 atomic_read(&mhi_cntrl->dev_wake));
+		read_lock_bh(&mhi_cntrl->pm_lock);
+		mhi_cntrl->wake_get(mhi_cntrl, true);
+		mhi_cntrl->wake_put(mhi_cntrl, true);
+		read_unlock_bh(&mhi_cntrl->pm_lock);
+		return;
+	}
+
+	mhi_cntrl->status_cb(mhi_cntrl, mhi_cntrl->priv_data, MHI_CB_IDLE);
 }
 
 int mhi_pm_m3_transition(struct mhi_controller *mhi_cntrl)
@@ -1075,10 +1082,9 @@ void mhi_power_down(struct mhi_controller *mhi_cntrl, bool graceful)
 
 	if (!mhi_cntrl->pre_init) {
 		/* free all allocated resources */
-		if (mhi_cntrl->fbc_image) {
-			mhi_free_bhie_table(mhi_cntrl, mhi_cntrl->fbc_image);
-			mhi_cntrl->fbc_image = NULL;
-		}
+		if (mhi_cntrl->fbc_image)
+			mhi_free_bhie_table(mhi_cntrl, &mhi_cntrl->fbc_image);
+
 		mhi_deinit_dev_ctxt(mhi_cntrl);
 	}
 }
@@ -1103,7 +1109,6 @@ EXPORT_SYMBOL(mhi_sync_power_up);
 int mhi_pm_suspend(struct mhi_controller *mhi_cntrl)
 {
 	int ret;
-	int timeout = 0;
 	enum MHI_PM_STATE new_state;
 	struct mhi_chan *itr, *tmp;
 	struct mhi_device *mhi_dev = mhi_cntrl->mhi_dev;
@@ -1142,8 +1147,6 @@ int mhi_pm_suspend(struct mhi_controller *mhi_cntrl)
 		goto error_m0_entry;
 	}
 
-	disable_irq(mhi_cntrl->irq[mhi_cntrl->mhi_event->msi]);
-
 	write_lock_irq(&mhi_cntrl->pm_lock);
 
 	/*
@@ -1181,33 +1184,16 @@ int mhi_pm_suspend(struct mhi_controller *mhi_cntrl)
 	/* finish reg writes before D3 cold */
 	mhi_force_reg_write(mhi_cntrl);
 
-	while (timeout < 20) {
+	ret = wait_event_timeout(mhi_cntrl->state_event,
+				 mhi_cntrl->dev_state == MHI_STATE_M3 ||
+				 MHI_PM_IN_ERROR_STATE(mhi_cntrl->pm_state),
+				 msecs_to_jiffies(mhi_cntrl->timeout_ms));
 
-		msleep(500);
-
-		if (MHI_PM_IN_ERROR_STATE(mhi_cntrl->pm_state)) {
-			ret = -EIO;
-			MHI_ERR("Did not enter M3 state, cur_state:%s pm_state:%s\n",
-				TO_MHI_STATE_STR(mhi_cntrl->dev_state),
-				to_mhi_pm_state_str(mhi_cntrl->pm_state));
-
-			break;
-		}
-
-		if (mhi_get_mhi_state(mhi_cntrl) == MHI_STATE_M3) {
-			mhi_ctrl_ev_process(mhi_cntrl, mhi_cntrl->mhi_event);
-			break;
-		}
-		timeout++;
-	}
-
-	enable_irq(mhi_cntrl->irq[mhi_cntrl->mhi_event->msi]);
-
-	if (timeout > 20) {
-		ret = -ETIMEDOUT;
+	if (!ret || MHI_PM_IN_ERROR_STATE(mhi_cntrl->pm_state)) {
 		MHI_ERR("Did not enter M3 state, cur_state:%s pm_state:%s\n",
 			TO_MHI_STATE_STR(mhi_cntrl->dev_state),
 			to_mhi_pm_state_str(mhi_cntrl->pm_state));
+		return -EIO;
 	}
 
 	/* notify any clients we enter lpm */
@@ -1215,6 +1201,9 @@ int mhi_pm_suspend(struct mhi_controller *mhi_cntrl)
 		if (itr->mhi_dev)
 			mhi_notify(itr->mhi_dev, MHI_CB_LPM_ENTER);
 	}
+
+	/* disable mhi irq */
+	mhi_irq_setup(mhi_cntrl, false);
 
 	return 0;
 
@@ -1357,7 +1346,6 @@ int mhi_pm_resume(struct mhi_controller *mhi_cntrl)
 {
 	enum MHI_PM_STATE cur_state;
 	int ret;
-	int timeout = 0;
 	struct mhi_chan *itr, *tmp;
 
 	MHI_LOG("Entered with pm_state:%s dev_state:%s\n",
@@ -1372,13 +1360,14 @@ int mhi_pm_resume(struct mhi_controller *mhi_cntrl)
 
 	MHI_ASSERT(mhi_cntrl->pm_state != MHI_PM_M3, "mhi_pm_state != M3");
 
+	/* enable mhi irqs */
+	mhi_irq_setup(mhi_cntrl, true);
+
 	/* notify any clients we enter lpm */
 	list_for_each_entry_safe(itr, tmp, &mhi_cntrl->lpm_chans, node) {
 		if (itr->mhi_dev)
 			mhi_notify(itr->mhi_dev, MHI_CB_LPM_EXIT);
 	}
-
-	disable_irq(mhi_cntrl->irq[mhi_cntrl->mhi_event->msi]);
 
 	write_lock_irq(&mhi_cntrl->pm_lock);
 	cur_state = mhi_tryset_pm_state(mhi_cntrl, MHI_PM_M3_EXIT);
@@ -1395,33 +1384,10 @@ int mhi_pm_resume(struct mhi_controller *mhi_cntrl)
 	mhi_set_mhi_state(mhi_cntrl, MHI_STATE_M0);
 	write_unlock_irq(&mhi_cntrl->pm_lock);
 
-	while (timeout < 20) {
-
-		msleep(500);
-
-		if (MHI_PM_IN_ERROR_STATE(mhi_cntrl->pm_state)) {
-			ret = -EIO;
-			MHI_ERR("Did not enter M0 state, cur_state:%s pm_state:%s\n",
-				TO_MHI_STATE_STR(mhi_cntrl->dev_state),
-				to_mhi_pm_state_str(mhi_cntrl->pm_state));
-			break;
-		}
-
-		if (mhi_get_mhi_state(mhi_cntrl) == MHI_STATE_M0) {
-			mhi_ctrl_ev_process(mhi_cntrl, mhi_cntrl->mhi_event);
-			break;
-		}
-		timeout++;
-	}
-
-	enable_irq(mhi_cntrl->irq[mhi_cntrl->mhi_event->msi]);
-
-	if (timeout > 20) {
-		ret = -ETIMEDOUT;
-		MHI_ERR("Did not enter M0 state, cur_state:%s pm_state:%s\n",
-			TO_MHI_STATE_STR(mhi_cntrl->dev_state),
-			to_mhi_pm_state_str(mhi_cntrl->pm_state));
-	}
+	ret = wait_event_timeout(mhi_cntrl->state_event,
+				 mhi_cntrl->dev_state == MHI_STATE_M0 ||
+				 MHI_PM_IN_ERROR_STATE(mhi_cntrl->pm_state),
+				 msecs_to_jiffies(mhi_cntrl->timeout_ms));
 
 	read_lock_bh(&mhi_cntrl->pm_lock);
 	mhi_cntrl->wake_put(mhi_cntrl, false);
@@ -1630,6 +1596,57 @@ int mhi_device_get_sync(struct mhi_device *mhi_dev, int vote)
 	return 0;
 }
 EXPORT_SYMBOL(mhi_device_get_sync);
+
+int mhi_device_get_sync_atomic(struct mhi_device *mhi_dev, int timeout_us)
+{
+	struct mhi_controller *mhi_cntrl = mhi_dev->mhi_cntrl;
+
+	read_lock_bh(&mhi_cntrl->pm_lock);
+	if (MHI_PM_IN_ERROR_STATE(mhi_cntrl->pm_state)) {
+		read_unlock_bh(&mhi_cntrl->pm_lock);
+		return -EIO;
+	}
+
+	mhi_cntrl->wake_get(mhi_cntrl, true);
+	read_unlock_bh(&mhi_cntrl->pm_lock);
+
+	atomic_inc(&mhi_dev->dev_vote);
+	pm_wakeup_hard_event(&mhi_cntrl->mhi_dev->dev);
+	mhi_cntrl->runtime_get(mhi_cntrl, mhi_cntrl->priv_data);
+
+	/* Return if client doesn't want us to wait */
+	if (!timeout_us) {
+		if (mhi_cntrl->pm_state != MHI_PM_M0)
+			MHI_ERR("Return without waiting for M0\n");
+
+		mhi_cntrl->runtime_put(mhi_cntrl, mhi_cntrl->priv_data);
+		return 0;
+	}
+
+	while (mhi_cntrl->pm_state != MHI_PM_M0 &&
+			!MHI_PM_IN_ERROR_STATE(mhi_cntrl->pm_state) &&
+			timeout_us > 0) {
+		udelay(MHI_FORCE_WAKE_DELAY_US);
+		timeout_us -= MHI_FORCE_WAKE_DELAY_US;
+	}
+
+	if (MHI_PM_IN_ERROR_STATE(mhi_cntrl->pm_state) || timeout_us <= 0) {
+		MHI_ERR("Did not enter M0 state, cur_state:%s pm_state:%s\n",
+			TO_MHI_STATE_STR(mhi_cntrl->dev_state),
+			to_mhi_pm_state_str(mhi_cntrl->pm_state));
+		read_lock_bh(&mhi_cntrl->pm_lock);
+		mhi_cntrl->wake_put(mhi_cntrl, false);
+		read_unlock_bh(&mhi_cntrl->pm_lock);
+		atomic_dec(&mhi_dev->dev_vote);
+		mhi_cntrl->runtime_put(mhi_cntrl, mhi_cntrl->priv_data);
+		return -ETIMEDOUT;
+	}
+
+	mhi_cntrl->runtime_put(mhi_cntrl, mhi_cntrl->priv_data);
+
+	return 0;
+}
+EXPORT_SYMBOL(mhi_device_get_sync_atomic);
 
 void mhi_device_put(struct mhi_device *mhi_dev, int vote)
 {

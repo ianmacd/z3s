@@ -130,10 +130,15 @@ enum usb_certi_type {
 	USB_CERTI_HUB_DEPTH_EXCEED,
 	USB_CERTI_HUB_POWER_EXCEED,
 	USB_CERTI_HOST_RESOURCE_EXCEED,
+	USB_CERTI_WARM_RESET,
 };
 
 enum usb_err_type {
 	USB_ERR_ABNORMAL_RESET,
+};
+
+enum usb_itracker_type {
+	NOTIFY_USB_CC_REPEAT,
 };
 
 enum usb_current_state {
@@ -182,6 +187,7 @@ extern const char *status_string(enum otg_notify_event_status status);
 extern void send_usb_mdm_uevent(void);
 extern void send_usb_certi_uevent(int usb_certi);
 extern void send_usb_err_uevent(int usb_certi, int mode);
+extern void send_usb_itracker_uevent(int err_type);
 extern int usb_check_whitelist_for_mdm(struct usb_device *dev);
 extern int usb_otg_restart_accessory(struct usb_device *dev);
 extern void send_otg_notify(struct otg_notify *n,
@@ -226,6 +232,7 @@ static inline const char *status_string(enum otg_notify_event_status status)
 static inline void send_usb_mdm_uevent(void) {}
 static inline void send_usb_certi_uevent(int usb_certi) {}
 static inline void send_usb_err_uevent(int usb_certi, int mode) {}
+static inline void send_usb_itracker_uevent(int err_type) {}
 static inline int usb_check_whitelist_for_mdm(struct usb_device *dev)
 			{return 0; }
 static inline int usb_otg_restart_accessory(struct usb_device *dev)

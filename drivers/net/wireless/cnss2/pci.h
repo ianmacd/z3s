@@ -8,6 +8,9 @@
 #include <asm/dma-iommu.h>
 #include <linux/msm_pcie.h>
 #endif
+#ifdef CONFIG_ARCH_EXYNOS9
+#include <linux/exynos-pci-noti.h>
+#endif
 #include <linux/iommu.h>
 #include <linux/mhi.h>
 #include <linux/pci.h>
@@ -76,12 +79,17 @@ struct cnss_pci_data {
 #ifdef CONFIG_ARCH_QCOM
 	struct msm_pcie_register_event msm_pci_event;
 #endif
+#ifdef CONFIG_ARCH_EXYNOS9
+	struct exynos_pcie_register_event exynos_pci_event;
+#endif
 	atomic_t auto_suspended;
 	atomic_t drv_connected;
 	u8 drv_connected_last;
 	u16 def_link_speed;
 	u16 def_link_width;
+	struct completion wake_event;
 	u8 monitor_wake_intr;
+	u32 wake_counter;
 	struct iommu_domain *iommu_domain;
 	u8 smmu_s1_enable;
 	dma_addr_t smmu_iova_start;
@@ -166,8 +174,10 @@ static inline int cnss_pci_get_drv_connected(void *bus_priv)
 	return atomic_read(&pci_priv->drv_connected);
 }
 
+int cnss_pci_check_link_status(struct cnss_pci_data *pci_priv);
 int cnss_suspend_pci_link(struct cnss_pci_data *pci_priv);
 int cnss_resume_pci_link(struct cnss_pci_data *pci_priv);
+int cnss_pci_recover_link_down(struct cnss_pci_data *pci_priv);
 int cnss_pci_init(struct cnss_plat_data *plat_priv);
 void cnss_pci_deinit(struct cnss_plat_data *plat_priv);
 void cnss_pci_add_fw_prefix_name(struct cnss_pci_data *pci_priv,
@@ -215,5 +225,5 @@ int cnss_pci_debug_reg_read(struct cnss_pci_data *pci_priv, u32 offset,
 			    u32 *val);
 int cnss_pci_debug_reg_write(struct cnss_pci_data *pci_priv, u32 offset,
 			     u32 val);
-
+void cnss_pci_force_save_dump(struct cnss_pci_data *pci_priv);
 #endif /* _CNSS_PCI_H */

@@ -51,25 +51,12 @@ QDF_STATUS rrm_process_link_measurement_request(struct mac_context *mac,
 							  *pLinkReq,
 						struct pe_session *
 							  pe_session);
-/*
- * rrm_process_radio_measurement_request - Processes the Radio Resource
- * Measurement request
- *
- * @mac_ctx: Global pointer to MAC context
- * @peer: Macaddress of the peer requesting the radio measurement.
- * @rrm_req: Array of Measurement request IEs
- * @session_entry: session entry.
- * @error_code: beacon report resp error code
- *
- * Return: QDF_STATUS
- */
+
 QDF_STATUS
 rrm_process_radio_measurement_request(struct mac_context *mac_ctx,
 				      tSirMacAddr peer,
 				      tDot11fRadioMeasurementRequest *rrm_req,
-				      struct pe_session *session_entry,
-				      enum beacon_report_status_code
-				      error_code);
+				      struct pe_session *session_entry);
 
 QDF_STATUS rrm_process_neighbor_report_response(struct mac_context *mac,
 						tDot11fNeighborReportResponse
@@ -102,6 +89,24 @@ rrm_process_neighbor_report_req(struct mac_context *mac,
 QDF_STATUS
 rrm_process_beacon_report_xmit(struct mac_context *mac_ctx,
 			       tpSirBeaconReportXmitInd beacon_xmit_ind);
+
+/**
+ * rrm_reject_req - Reject rrm request
+ * @radiomes_report: radio measurement report
+ * @rrm_req: Array of Measurement request IEs
+ * @num_report: Num of report
+ * @index: Measurement index
+ * @measurement_type: Measurement Type
+ *
+ * Reject the Radio Resource Measurement request, if one is
+ * already in progress
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS rrm_reject_req(tpSirMacRadioMeasureReport *radiomes_report,
+			  tDot11fRadioMeasurementRequest *rrm_req,
+			  uint8_t *num_report, uint8_t index,
+			  uint8_t measurement_type);
 
 void lim_update_rrm_capability(struct mac_context *mac_ctx,
 			       struct join_req *join_req);

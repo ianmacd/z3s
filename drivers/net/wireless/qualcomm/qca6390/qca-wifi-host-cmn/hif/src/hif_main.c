@@ -49,6 +49,9 @@
 #include <qdf_notifier.h>
 #include <qdf_hang_event_notifier.h>
 #endif
+#include "host_diag_core_event.h"
+
+static qdf_wake_lock_t wlan_hif_sap_wake_lock;
 
 void hif_dump(struct hif_opaque_softc *hif_ctx, uint8_t cmd_id, bool start)
 {
@@ -114,9 +117,25 @@ void hif_vote_link_down(struct hif_opaque_softc *hif_ctx)
 	QDF_BUG(scn);
 	scn->linkstate_vote--;
 	HIF_INFO("Down_linkstate_vote %d", scn->linkstate_vote);
-	if (scn->linkstate_vote == 0)
+	if (scn->linkstate_vote == 0) {
 		hif_bus_prevent_linkdown(scn, false);
+		qdf_wake_lock_release(&wlan_hif_sap_wake_lock,
+				      WIFI_POWER_EVENT_WAKELOCK_HIF_SAP);
+		HIF_INFO("Allow system suspend");
+	}
 }
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0))
+static void hif_abort_system_suspend(void)
+{
+	HIF_INFO("Abort system suspend");
+	qdf_pm_system_wakeup();
+}
+#else
+static void hif_abort_system_suspend(void)
+{
+}
+#endif
 
 /**
  * hif_vote_link_up(): vote to prevent bus from suspending
@@ -136,8 +155,13 @@ void hif_vote_link_up(struct hif_opaque_softc *hif_ctx)
 	QDF_BUG(scn);
 	scn->linkstate_vote++;
 	HIF_INFO("Up_linkstate_vote %d", scn->linkstate_vote);
-	if (scn->linkstate_vote == 1)
+	if (scn->linkstate_vote == 1) {
 		hif_bus_prevent_linkdown(scn, true);
+		HIF_INFO("Prevent system suspend");
+		qdf_wake_lock_acquire(&wlan_hif_sap_wake_lock,
+				      WIFI_POWER_EVENT_WAKELOCK_HIF_SAP);
+		hif_abort_system_suspend();
+	}
 }
 
 /**
@@ -653,6 +677,11 @@ struct hif_opaque_softc *hif_open(qdf_device_t qdf_ctx,
 		scn = NULL;
 	}
 	hif_cpuhp_register(scn);
+
+	status = qdf_wake_lock_create(&wlan_hif_sap_wake_lock, "wlan_hif_sap");
+	if (status != 0)
+		HIF_ERROR("Cannot create hif wakelock");
+
 	return GET_HIF_OPAQUE_HDL(scn);
 }
 
@@ -683,6 +712,8 @@ void hif_uninit_rri_on_ddr(struct hif_softc *scn)
 void hif_close(struct hif_opaque_softc *hif_ctx)
 {
 	struct hif_softc *scn = HIF_GET_SOFTC(hif_ctx);
+
+	qdf_wake_lock_destroy(&wlan_hif_sap_wake_lock);
 
 	if (!scn) {
 		HIF_ERROR("%s: hif_opaque_softc is NULL", __func__);
